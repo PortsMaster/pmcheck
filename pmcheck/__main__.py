@@ -1,6 +1,6 @@
 """pmcheck CLI.
 
-  python -m pmcheck <zip|folder> [--format md|json|github] [--ai] [--warn-only]
+  python -m pmcheck <zip|folder> [--pr] [--format md|json|github] [--ai] [--warn-only]
   python -m pmcheck --sweep <PortMaster-New/ports>     rule hit counts across many ports
 """
 import argparse
@@ -14,8 +14,8 @@ from .model import load, LoadError
 from .rules import run_all
 
 
-def check_one(path, ai=False):
-    port = load(path)
+def check_one(path, ai=False, pr=False):
+    port = load(path, pr=pr)
     try:
         findings = run_all(port)
         ai_result = None
@@ -36,6 +36,7 @@ def main(argv=None):
     ap.add_argument("--warn-only", action="store_true", help="exit 0 even with errors")
     ap.add_argument("--prefix", default="", help="path prefix for GitHub annotations (e.g. ports/foo/)")
     ap.add_argument("--summary", help="also append the markdown report to this file (e.g. $GITHUB_STEP_SUMMARY)")
+    ap.add_argument("--pr", action="store_true", help="strict PortMaster-New PR layout (metadata next to the .sh)")
     ap.add_argument("--sweep", action="store_true", help="path is a folder of ports; print rule hit counts")
     a = ap.parse_args(argv)
 
@@ -44,7 +45,7 @@ def main(argv=None):
         dirs = sorted(p for p in Path(a.path).iterdir() if p.is_dir())
         for d in dirs:
             try:
-                _, fs, _ = check_one(d)
+                _, fs, _ = check_one(d, pr=True)
             except LoadError as e:
                 print(f"{d.name}: load error: {e}", file=sys.stderr)
                 continue
@@ -58,7 +59,7 @@ def main(argv=None):
         return 0
 
     try:
-        name, findings, ai = check_one(a.path, a.ai)
+        name, findings, ai = check_one(a.path, a.ai, a.pr)
     except LoadError as e:
         print(f"pmcheck: {e}", file=sys.stderr)
         return 2

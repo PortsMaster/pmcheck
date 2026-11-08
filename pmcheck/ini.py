@@ -50,7 +50,7 @@ def check_ini(text, f, scripts=""):
         prev = None
         for q, w in toks:
             t = q or w
-            if not t:
+            if not t or t == '\\"':
                 continue
             if prev in ("push_state", "set_state", "hold_state"):
                 prev = t

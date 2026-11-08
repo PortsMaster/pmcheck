@@ -118,12 +118,15 @@ def structure(port):
         yield Finding("structure.gamedir-name", ERROR, f"Game folder {gd!r} is not a clean name; use {name_cleaner(gd)!r}.")
     elif re.search(r"[_\-.]", gd):
         yield Finding("structure.gamedir-squash", INFO, f"Game folder {gd!r}: new ports use lowercase, squashed names (no _ - .).")
-    if port.layout == "zip":
-        extra = [p.name for p in port.top_files]
+    if port.pr and port.layout != "pr":
+        yield Finding("structure.pr-layout", ERROR, "PR layout: port.json, README.md, gameinfo.xml and the images go next to the .sh, not in the game folder.",
+                      fix=f"Move them from {gd}/ up one level.")
+    if not port.pr:
+        extra = [p.name for p in port.top_files if p.name.lower() not in data.META_FILES]
         if extra:
-            yield Finding("structure.top-level", WARN, "Zip top level should hold only the .sh and the game folder; found: " + ", ".join(extra),
+            yield Finding("structure.top-level", WARN, "Zip top level should hold only the .sh, the game folder and the port metadata; found: " + ", ".join(extra),
                           fix="Move these into the game folder.")
-        if len(port.top_dirs) > 1:
+    if port.layout == "zip" and len(port.top_dirs) > 1:
             yield Finding("structure.top-level", WARN, "More than one top-level folder: " + ", ".join(d.name for d in port.top_dirs))
     for j in sorted(set(port.junk)):
         yield Finding("structure.junk", WARN, f"Junk file/folder {j!r} in the package.", fix="Remove it (macOS/Windows leftovers).")
@@ -166,12 +169,15 @@ def _biggest_subdirs(port, n=3):
 def required_files(port):
     if port.meta is None:
         return
-    where = port.rel(port.meta) if port.meta != port.root else "top level"
+    where = port.where()
     for name, sev in (("port.json", ERROR), ("README.md", ERROR), ("gameinfo.xml", ERROR),
-                      ("screenshot.png", ERROR), ("cover.png", WARN)):
+                      ("screenshot.png", ERROR)):
         if port.meta_file(name) is None and not (name == "screenshot.png" and port.meta_file("screenshot.jpg")):
             yield Finding("files.missing", sev, f"Missing {name} ({where}).")
-    if port.layout == "zip" and port.meta_file("testing_thread.txt") is None:
+    for c in port.files():
+        if c.name.lower() == "cover.png" and c.parent not in port.meta_dirs():
+            yield Finding("files.cover-location", WARN, f"{port.rel(c)} is in the wrong place; cover.png goes {where}.", file=port.rel(c))
+    if not port.pr and port.meta_file("testing_thread.txt") is None:
         yield Finding("files.testing-thread", INFO, "No testing_thread.txt.")
     if port.gamedir is not None:
         lic = [d for d in port.gamedir.iterdir() if d.is_dir() and d.name.lower() in ("licenses", "license")]
@@ -317,12 +323,17 @@ def gameinfo(port):
     if get("releasedate") and not re.fullmatch(r"\d{8}T\d{6}", get("releasedate")):
         yield Finding("gameinfo.releasedate", WARN, f"<releasedate> {get('releasedate')!r}: use YYYYMMDDT000000.", file=f)
     if port.gamedir is not None:
-        want = f"./{port.gamedir.name}/screenshot.png"
+        gd = port.gamedir.name
+        want = f"./{gd}/screenshot.png"
         img = get("image")
+        ok = {f"./{gd}/{n}": n for n in ("screenshot.png", "screenshot.jpg", "cover.png")}
         if not img:
             yield Finding("gameinfo.image", ERROR, "<image> is missing.", file=f, fix=f"<image>{want}</image>")
-        elif img != want and img != want[:-3] + "jpg":
-            yield Finding("gameinfo.image", WARN, f"<image> is {img!r}; use {want!r}.", file=f, fix=f"<image>{want}</image>")
+        elif img not in ok:
+            yield Finding("gameinfo.image", WARN, f"<image> is {img!r}; use {want!r} (or ./{gd}/cover.png).", file=f, fix=f"<image>{want}</image>")
+        elif port.meta_file(ok[img]) is None:
+            yield Finding("gameinfo.image", ERROR, f"<image> points to {ok[img]}, but the package has no {ok[img]} {port.where()}.", file=f,
+                          fix=f"Add {ok[img]}, or use <image>{want}</image>.")
 
 
 # ---------------------------------------------------------------- images
@@ -349,7 +360,7 @@ def images(port):
         size = image_size(shot)
         if size and tuple(size) != (640, 480):
             yield Finding("images.screenshot-size", ERROR, f"screenshot is {size[0]}x{size[1]}, must be 640x480.", file=port.rel(shot))
-    for p in port.meta.iterdir():
+    for p in (p for d in port.meta_dirs() for p in d.iterdir()):
         if p.is_file() and re.match(r"^(screenshot|cover)(\..+)?\.(png|jpe?g)$", p.name, re.I):
             kb = p.stat().st_size
             if kb > data.IMAGE_MAX_BYTES:

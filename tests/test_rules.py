@@ -96,8 +96,8 @@ def make_port(root, **over):
     return root
 
 
-def rules_of(path, sev=None):
-    port = load(path)
+def rules_of(path, sev=None, pr=False):
+    port = load(path, pr=pr)
     try:
         return {f.rule for f in run_all(port) if sev is None or f.severity == sev}
     finally:
@@ -110,6 +110,42 @@ class GoodPort(unittest.TestCase):
             make_port(t)
             self.assertEqual(rules_of(t, "ERROR"), set())
             self.assertEqual(rules_of(t, "WARN"), set())
+
+
+def to_pr_layout(root, names=("port.json", "README.md", "gameinfo.xml", "screenshot.png", "cover.png")):
+    for n in names:
+        (Path(root) / "testgame" / n).rename(Path(root) / n)
+
+
+class Layouts(unittest.TestCase):
+    def test_zip_accepts_pr_layout(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            to_pr_layout(t)
+            self.assertEqual(rules_of(t, "ERROR") | rules_of(t, "WARN"), set())
+
+    def test_zip_accepts_mixed(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            to_pr_layout(t, ("screenshot.png", "README.md"))
+            self.assertEqual(rules_of(t, "ERROR") | rules_of(t, "WARN"), set())
+
+    def test_pr_mode_rejects_zip_layout(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            self.assertIn("structure.pr-layout", rules_of(t, pr=True))
+
+    def test_pr_mode_accepts_pr_layout(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            to_pr_layout(t)
+            self.assertEqual(rules_of(t, "ERROR", pr=True), set())
+
+    def test_zip_stray_top_file(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            (Path(t) / "notes.txt").write_text("x")
+            self.assertIn("structure.top-level", rules_of(t))
 
 
 class BadPorts(unittest.TestCase):
@@ -134,7 +170,30 @@ class BadPorts(unittest.TestCase):
         self.check("images.screenshot-size", shot=(320, 240))
 
     def test_gameinfo_image(self):
-        self.check("gameinfo.image", gameinfo=GAMEINFO.replace("screenshot.png", "cover.png"))
+        self.check("gameinfo.image", gameinfo=GAMEINFO.replace("./testgame/screenshot.png", "./screenshot.png"))
+
+    def test_gameinfo_cover_ok(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, gameinfo=GAMEINFO.replace("screenshot.png", "cover.png"))
+            self.assertNotIn("gameinfo.image", rules_of(t))
+
+    def test_gameinfo_cover_missing(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, gameinfo=GAMEINFO.replace("screenshot.png", "cover.png"))
+            (Path(t) / "testgame" / "cover.png").unlink()
+            self.assertIn("gameinfo.image", rules_of(t, "ERROR"))
+
+    def test_no_cover_ok(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            (Path(t) / "testgame" / "cover.png").unlink()
+            self.assertEqual(rules_of(t, "WARN"), set())
+
+    def test_cover_location(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            (Path(t) / "testgame" / "cover.png").rename(Path(t) / "testgame" / "licenses" / "cover.png")
+            self.assertIn("files.cover-location", rules_of(t))
 
     def test_too_many_files(self):
         self.check("structure.too-many-files", extra_files=120)
@@ -184,6 +243,9 @@ class Ini(unittest.TestCase):
     def test_stick_deadzone(self):
         rules = {f.rule for f in check_ini('[controls]\nleft_analog_up = "up"\n', "x.ini")}
         self.assertIn("ini.deadzone", rules)
+
+    def test_empty_key(self):
+        self.assertEqual([f.rule for f in check_ini('[controls]\nup = \\"\n', "x.ini")], [])
 
     def test_good(self):
         txt = '[config]\ndeadzone_x = 10000\ndeadzone_y = 10000\n[controls]\na = "space"\nleft_analog_up = "up"\n'
@@ -242,7 +304,7 @@ class ZipSafety(unittest.TestCase):
 class Mcrust(unittest.TestCase):
     def test_review_findings(self):
         got = rules_of(os.environ["PMCHECK_MCRUST"])
-        for r in ("port.json.min_glibc", "port.json.porter", "gameinfo.image", "images.size",
+        for r in ("port.json.min_glibc", "port.json.porter", "images.size",
                   "structure.too-many-files", "runtime.bundled", "licenses.component", "sh.xdg"):
             self.assertIn(r, got)
 

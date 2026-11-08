@@ -7,7 +7,7 @@ import urllib.request
 from pathlib import Path
 
 API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-flash-latest"
 MAX_CHARS = 400_000          # well inside Flash's context; keeps the free-tier token budget sane
 MAX_FILE_CHARS = 60_000
 TEXT_NAMES = re.compile(r"(\.sh|\.bash|\.ini|\.gptk|\.json|\.xml|\.md|\.txt|\.cfg|\.conf|\.py)$", re.I)
@@ -87,7 +87,12 @@ def review(port, findings, api_key=None, model=None, timeout=180):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             resp = json.load(r)
     except urllib.error.HTTPError as e:
-        return f"AI review unavailable (HTTP {e.code}{', rate limited' if e.code == 429 else ''})."
+        try:
+            msg = json.loads(e.read())["error"]["message"][:200]
+        except Exception:
+            msg = ""
+        hint = ", rate limited" if e.code == 429 else f", model {model!r} not found, set PMCHECK_GEMINI_MODEL" if e.code == 404 else ""
+        return f"AI review unavailable (HTTP {e.code}{hint}){': ' + msg if msg else ''}."
     except (urllib.error.URLError, TimeoutError, ValueError) as e:
         return f"AI review unavailable ({e.__class__.__name__})."
     try:

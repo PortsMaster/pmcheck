@@ -30,7 +30,22 @@ class Port:
     junk: list = field(default_factory=list)
     symlinks: list = field(default_factory=list)
     zip_issues: list = field(default_factory=list)
+    pr: bool = False         # strict PR layout (GitHub check); False = testing zip, either layout is fine
     _tmp: object = None
+
+    def meta_dirs(self):
+        """Where metadata may sit: PR mode only `meta`; testing zips also accept the other spot."""
+        dirs = [d for d in (self.meta,) if d is not None]
+        if not self.pr:
+            for d in (self.gamedir, self.root):
+                if d is not None and d not in dirs:
+                    dirs.append(d)
+        return dirs
+
+    def where(self):
+        if self.pr:
+            return "next to the .sh"
+        return "next to the .sh or in the game folder"
 
     def rel(self, p):
         return str(Path(p).relative_to(self.root))
@@ -57,11 +72,10 @@ class Port:
         return out
 
     def meta_file(self, name):
-        if self.meta is None:
-            return None
-        for p in self.meta.iterdir():
-            if p.name.lower() == name.lower() and p.is_file():
-                return p
+        for d in self.meta_dirs():
+            for p in d.iterdir():
+                if p.name.lower() == name.lower() and p.is_file():
+                    return p
         return None
 
     def read_text(self, p, limit=2_000_000):
@@ -121,7 +135,7 @@ def safe_extract(zip_path, dest):
     return issues
 
 
-def load(path):
+def load(path, pr=False):
     path = Path(path)
     tmp = None
     symlinks = []
@@ -141,7 +155,7 @@ def load(path):
     if not any(p.suffix == ".sh" for p in entries) and len([p for p in entries if p.is_dir()]) == 1:
         root = next(p for p in entries if p.is_dir())
 
-    port = Port(root=root, layout="zip", _tmp=tmp)
+    port = Port(root=root, layout="zip", pr=pr, _tmp=tmp)
     port.symlinks = list(symlinks)
     for p in sorted(root.iterdir()):
         if p.name in JUNK:

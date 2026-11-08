@@ -13,7 +13,7 @@ Plan for about 30 minutes. Everything used is free.
 Create `PortsMaster/pmcheck` as a **public** repo with no README, licence or .gitignore (the code brings its own). Then, on the machine that has `/root/compile/pmcheck`:
 ```bash
 cd /root/compile/pmcheck
-git init && git add . && git commit -m "pmcheck 0.1.0"
+git init -b main && git add . && git commit -m "pmcheck 0.1.0"
 git remote add origin git@github.com:PortsMaster/pmcheck.git
 git push -u origin main
 git tag v0.1.0 && git push --tags
@@ -70,14 +70,15 @@ nano ~/.config/pmcheck-bot.env
 Fill in:
 ```
 DISCORD_TOKEN=<token from step 2>
-GUILD_ID=<server ID from step 3>
-ADMIN_ROLE_IDS=<role ID>,<role ID>
+GUILD_ID=1122861252088172575
+ADMIN_ROLE_IDS=1122861574328172635,1298913839919665284,1123158742175846432,1285521357752242187,1171201908615168001
 GEMINI_API_KEY=<key from step 4>
-PMCHECK_GEMINI_MODEL=gemini-2.5-flash
+PMCHECK_GEMINI_MODEL=gemini-flash-latest
 MAX_DOWNLOAD_MB=1024
 CHECK_TIMEOUT=900
 ```
-- If Google renames or retires the free model, change only `PMCHECK_GEMINI_MODEL`.
+- `gemini-flash-latest` follows Google's current Flash model, so retirements don't break it. To pin a model, list the ones your key can use:
+  `curl -s -H "x-goog-api-key: $GEMINI_API_KEY" https://generativelanguage.googleapis.com/v1beta/models | grep '"name"'`
 - The bot refuses to start when `ADMIN_ROLE_IDS` is empty.
 
 ## 8. First run in the foreground
@@ -131,6 +132,7 @@ systemctl --user restart pmcheck-bot
 | `download failed: HTTP 404/403` | The Discord attachment link expired (they're signed for about 24 h); copy a fresh link. |
 | `check timed out` | The port is very large or the server is busy; raise `CHECK_TIMEOUT`. |
 | `AI review skipped: no GEMINI_API_KEY` | The key is missing from the env file. |
+| `AI review unavailable (HTTP 404 ...)` | The model name is retired; set `PMCHECK_GEMINI_MODEL=gemini-flash-latest` and restart. |
 
 ## Security summary
 - Port code is never executed: zips are only parsed, plus `readelf`/`objdump`/`shellcheck`.

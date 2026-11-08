@@ -14,7 +14,7 @@ permissions:
   pull-requests: read
 
 env:
-  PMCHECK_REF: v0.1.0        # pinned pmcheck tag
+  PMCHECK_REF: v0.1.1        # pinned pmcheck tag
   PMCHECK_WARN_ONLY: "true"  # set to "false" after the warn-only period
 
 jobs:
@@ -59,6 +59,6 @@ jobs:
           [ "$PMCHECK_WARN_ONLY" = "true" ] && extra="--warn-only"
           while read -r d; do
             [ -d "$d" ] || { echo "$d removed, skipping"; continue; }
-            pmcheck "$d" --format github --prefix "$d/" --summary "$GITHUB_STEP_SUMMARY" $extra || rc=1
+            pmcheck "$d" --pr --format github --prefix "$d/" --summary "$GITHUB_STEP_SUMMARY" $extra || rc=1
           done <<< "$DIRS"
           exit $rc
