@@ -480,6 +480,13 @@ def licences(port):
     if port.gamedir is None:
         return
     lic = next((d for d in port.gamedir.iterdir() if d.is_dir() and d.name.lower() in ("licenses", "license")), None)
+    pj = json_load(port)
+    attr = (pj.get("attr") or {}) if isinstance(pj, dict) else {}
+    if attr.get("rtr") is True and not _game_licence(port, lic, attr):
+        where = port.rel(lic) if lic else f"{port.gamedir.name}/licenses"
+        yield Finding("licenses.game", ERROR, "Ready-to-run port with no licence for the game itself (only library licences found).",
+                      file=port.rel(json_load_path(port)) if json_load_path(port) else "",
+                      fix=f"Add {where}/LICENSE.{port.gamedir.name}.txt with the game's licence, or the developer's permission to distribute (an image of it is fine).")
     if lic is None:
         return
     corpus = " ".join(f.name.lower() for f in lic.rglob("*"))
@@ -501,6 +508,32 @@ def licences(port):
         if cands and not any(c in squashed for c in cands):
             yield Finding("licenses.component", WARN, f"No licence found mentioning {stem!r} ({port.rel(p)}).", file=port.rel(p),
                           fix=f"Add {port.rel(lic)}/LICENSE.{stem}.")
+
+
+GENERIC_LICENCE = re.compile(r"^(licen[cs]e|copying|eula|permission)s?(\.(txt|md))?$", re.I)
+IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+
+def json_load_path(port):
+    return port.meta_file("port.json") if port.meta else None
+
+
+def _game_licence(port, lic, attr):
+    """True if something in the package looks like the game's own licence or distribution permission."""
+    keys = {port.gamedir.name.lower(), re.sub(r"[^a-z0-9]", "", str(attr.get("title", "")).lower())}
+    keys |= {w for w in re.findall(r"[a-z0-9]{4,}", str(attr.get("title", "")).lower())}
+    keys |= {"game", "permission", "eula"}
+    keys.discard("")
+    for f in port.gamedir.rglob("*"):
+        if not f.is_file() or any(p.startswith("libs.") for p in f.relative_to(port.gamedir).parts):
+            continue
+        in_lic = lic is not None and lic in f.parents
+        name = f.name.lower()
+        if GENERIC_LICENCE.match(name):
+            return True
+        if in_lic and (name.endswith(IMAGE_EXT) or any(k in re.sub(r"[^a-z0-9]", "", name) for k in keys)):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------- launch script
@@ -616,6 +649,12 @@ def _script(port, s):
                 yield Finding("sh.shellcheck", ERROR, f"SC{item['code']}: {item['message']}", file=f, line=item.get("line", 0))
         except ValueError:
             pass
+    if not re.search(r"gptokeyb", body, re.I):
+        yield Finding("sh.no-gptokeyb", ERROR, "No gptokeyb launched, so there is no hotkey exit (Select+Start).", file=f,
+                      fix='Launch it before the game, e.g. $GPTOKEYB2 "$BINARY" & (no -c needed for the kill switch alone), or $GPTOKEYB "$BINARY" &.')
+    for n, l in grep(r"^\s*exec\s*>\s*\"?\$\{?GAMEDIR\}?/log\.txt\"?\s*2>&1\s*$"):
+        yield Finding("sh.log-old", WARN, "Old logging line.", file=f, line=n,
+                      fix='> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1')
     # Control files referenced by the script
     for n, l in grep(r"\$GPTOKEYB2\b"):
         if "-c" not in l and port.gamedir is not None and any(port.gamedir.glob("*.ini")):

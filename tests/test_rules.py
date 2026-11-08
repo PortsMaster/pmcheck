@@ -223,6 +223,42 @@ class Relaxed(unittest.TestCase):
             self.assertIn("Rename testgame/testgame.md to testgame/README.md", f[0].fix)
 
 
+class HotkeyLicenceLog(unittest.TestCase):
+    def test_no_gptokeyb(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace('$GPTOKEYB2 "testgame.aarch64" &\n', ""))
+            self.assertIn("sh.no-gptokeyb", rules_of(t, "ERROR"))
+
+    def test_classic_gptokeyb_ok(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace("$GPTOKEYB2", "$GPTOKEYB"))
+            self.assertNotIn("sh.no-gptokeyb", rules_of(t))
+
+    def test_rtr_needs_game_licence(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            lic = Path(t) / "testgame" / "licenses"
+            (lic / "LICENSE.testgame").rename(lic / "LICENSE.zlib")
+            self.assertIn("licenses.game", rules_of(t, "ERROR"))
+            (lic / "permission.png").write_bytes(png(10, 10))
+            self.assertNotIn("licenses.game", rules_of(t))
+
+    def test_not_rtr_no_game_licence_ok(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, attr={"rtr": False})
+            lic = Path(t) / "testgame" / "licenses"
+            (lic / "LICENSE.testgame").rename(lic / "LICENSE.zlib")
+            self.assertNotIn("licenses.game", rules_of(t))
+
+    def test_old_log_line(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace('cd "$GAMEDIR"\n', 'cd "$GAMEDIR"\nexec > "$GAMEDIR/log.txt" 2>&1\n'))
+            self.assertIn("sh.log-old", rules_of(t, "WARN"))
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace('cd "$GAMEDIR"\n', 'cd "$GAMEDIR"\n> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1\n'))
+            self.assertNotIn("sh.log-old", rules_of(t))
+
+
 class PRLink(unittest.TestCase):
     def test_pr_number(self):
         from pmcheck.ghpr import pr_number

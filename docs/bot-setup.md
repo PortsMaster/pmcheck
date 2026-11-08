@@ -150,6 +150,7 @@ systemctl --user restart pmcheck-bot
 
 ## Security summary
 - Port code is never executed: zips are only parsed, plus `readelf`/`objdump`/`shellcheck`.
+- Nothing is kept: each check runs in its own folder under the container's `/tmp`, which is deleted when the check ends, also on failure or timeout. `/tmp` is a RAM tmpfs (8 GB cap) that disappears on every restart, and leftovers from a crash are removed when the bot starts.
 - Zips that contain `..` paths, absolute paths or symlinks, or that expand into a zip bomb, are rejected.
 - Only Discord and GitHub https links are accepted, with a size cap and one check at a time.
 - The container runs read-only and unprivileged, with no capabilities, and with memory, CPU and process limits.

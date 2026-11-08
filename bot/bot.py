@@ -73,15 +73,18 @@ async def download(url, dest):
             return size
 
 
-async def run_pmcheck(zip_path, fmt, pr=False):
+async def run_pmcheck(zip_path, fmt, workdir, pr=False):
+    # TMPDIR inside the per-check folder: even a killed check leaves nothing outside it.
+    env = dict(os.environ, TMPDIR=str(workdir))
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-I", "-m", "pmcheck", str(zip_path), "--format", fmt, "--ai", "--warn-only", *(["--pr"] if pr else []),
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env,
     )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), TIMEOUT)
     except asyncio.TimeoutError:
         proc.kill()
+        await proc.wait()
         raise ValueError(f"check timed out after {TIMEOUT}s")
     if proc.returncode not in (0, 1):
         raise ValueError(err.decode(errors="replace").strip()[-500:] or "pmcheck failed")
@@ -123,7 +126,7 @@ async def checkport(inter: discord.Interaction, url: str):
             results, mds = [], []
             for target in targets:
                 t1 = time.monotonic()
-                result = json.loads(await run_pmcheck(target, "json", pr=bool(prn)))
+                result = json.loads(await run_pmcheck(target, "json", tmp, pr=bool(prn)))
                 results.append(result)
                 mds.append(await run_pmcheck_md_from(result))
                 c = result["counts"]
@@ -158,6 +161,13 @@ async def run_pmcheck_md_from(result):
     return markdown(result["port"], fs, result.get("ai"))
 
 
+def clean_stale():
+    """Remove check folders left by a crash or kill (the container's /tmp is a RAM tmpfs, also wiped on restart)."""
+    root = Path(tempfile.gettempdir())
+    for d in list(root.glob("pmbot-*")) + list(root.glob("pmcheck-*")):
+        shutil.rmtree(d, ignore_errors=True)
+
+
 @client.event
 async def on_ready():
     await tree.sync(guild=GUILD)
@@ -167,4 +177,5 @@ async def on_ready():
 if __name__ == "__main__":
     if not ADMIN_ROLES:
         sys.exit("ADMIN_ROLE_IDS is empty; refusing to start an unrestricted bot.")
+    clean_stale()
     client.run(TOKEN)

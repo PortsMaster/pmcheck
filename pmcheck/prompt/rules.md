@@ -16,7 +16,7 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - Licence folder named `licenses/` or `license/`. A licence or distribution permission given as an image (e.g. a screenshot of the developer's permission).
 - Classic gptokeyb and `.gptk` files. In both `.gptk` and gptokeyb2 `.ini`, a value of `\"` (unquoted backslash-quote) is the explicit "no key" binding. Missing stick deadzones (the rule checker already notes it).
 - PortMaster's standard GameMaker/gmloader template: `export LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"`, `export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"`, the 7zzs check, the `patcher.txt` block with `PATCHER_*` exports, `$ESUDO kill -9 $(pidof gptokeyb)` after the patcher, `tools/patchscript` with its own logging and `chmod 666 /dev/uinput`, `options.ini` with a `[Windows]` section when gmloader.json sets `force_platform`.
-- `pm_message "text"` without options (older template style). The log redirect `> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1`.
+- `pm_message "text"` without options (older template style). The log redirect `> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1` (the old `exec > "$GAMEDIR/log.txt" 2>&1` is flagged by the rule checker).
 
 ## Hard rules
 - Launch script: `#!/bin/bash` then straight into the PortMaster header (`XDG_DATA_HOME=...`, controlfolder detection, `source $controlfolder/control.txt`, `mod_${CFW_NAME}.txt`, `get_controls`). Nothing above it. No narrative comment blocks.
@@ -27,7 +27,7 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - Never redirect `HOME` or `XDG_CONFIG_HOME` (PulseAudio symlink fails on FAT/exFAT). Use `bind_directories <target> <source>` / `bind_files`; the source path must be created (`mkdir -p` / `touch`) before the call or the bind silently does nothing.
 - Data archives: extract with `gunzip -c "$ARCHIVE" | tar --no-same-owner -xf -` (never `tar -xzf`).
 - Player messages: `pm_message` / `pm_show_error`, never plain `echo` (that only reaches the log). Never call portmsg directly. `pm_finish` at the end. Use `$ESUDO`, never `sudo`.
-- Controls: classic gptokeyb (`$GPTOKEYB`, `.gptk`) and gptokeyb2 (`$GPTOKEYB2`, `.ini`) are both valid; never ask to switch. Don't bind quit next to a primary action button.
+- Controls: every port launches gptokeyb (classic `$GPTOKEYB` with `.gptk`, or `$GPTOKEYB2` with `.ini`; both are valid, never ask to switch) for the Select+Start hotkey exit. Its kill target must be the process that actually runs (e.g. `java`, `love`, the interpreter), or the hotkey does nothing. Don't bind quit next to a primary action button.
 - Runtimes: use PortMaster's runtime squashfs files (Westonpack, JDK, Mono, Godot/FRT ...) instead of bundling a runtime. `port.json` `runtime` uses catalog keys (e.g. `weston_pkg_0.2`), never display labels, no arch suffix.
 - port.json v4: `name` = `<gamedir>.zip`; `items` = script + game folder; one `porter` entry per person; `desc`/`inst` plain text; `inst` = setup instructions only (not controls); `store` entries are objects `{name, gameurl, developerurl}`; `min_glibc` = highest GLIBC_2.x of any shipped native binary.
 - gameinfo.xml: `<path>./Script Name.sh</path>`, `<image>./<gamedir>/screenshot.png</image>` (or cover.png if shipped), `<releasedate>YYYYMMDDT000000</releasedate>`.
@@ -37,5 +37,5 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - README / port.json `inst` / launch-script messages disagreeing about what files the user must supply and where.
 - README controls table not matching the `.ini` mapping (check every row against the actual bindings, including hotkey states).
 - Names, URLs or versions that disagree between files (developer name spelled differently in README and gameinfo.xml, etc.).
-- Licence files that don't cover a bundled component (wrong project, only a disclaimer).
+- Licence files that don't cover a bundled component (wrong project, only a disclaimer). A ready-to-run port (`"rtr": true`) must ship the game's own licence or the developer's permission to distribute; check that the file the rule checker accepted really is about this game.
 - Anything that would break on a CFW running the port unprivileged, on a read-only root, or on FAT/exFAT.
