@@ -27,7 +27,6 @@ ELF_MACHINE_ARCH = {
 # Libraries a port must never bundle: the CFW ships a device-specific build.
 BANNED_LIBS = [
     (re.compile(r"^libSDL2(-2\.0)?\.so"), "SDL2 comes from the CFW (device-patched KMS/DRM, input, audio)"),
-    (re.compile(r"^libSDL3\.so"), "real SDL3 is not shipped; use the sdl3-sdl2-backend shim build if SDL3 is needed"),
     (re.compile(r"^libGLESv1_CM\.so|^libGLESv2\.so|^libmali"), "GPU driver library, always from the CFW"),
     (re.compile(r"^libdrm\.so|^libgbm\.so"), "display stack library, always from the CFW"),
     (re.compile(r"^libwayland-(client|egl|cursor|server)\.so"), "compositor-adjacent library, always from the CFW"),

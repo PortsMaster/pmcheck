@@ -419,8 +419,11 @@ def binaries(port):
         if data.GL_LIBS.match(name) and not _in_gl4es(p):
             yield Finding("libs.banned", ERROR, f"{rel}: libGL/libEGL outside a gl4es.<arch>/ folder.", file=rel)
         for rx, why in data.BANNED_LIBS:
-            if rx.match(name) and not (name.startswith("libSDL3") and b"SDL3SHIM_" in p.read_bytes()):
+            if rx.match(name):
                 yield Finding("libs.banned", ERROR, f"{rel} must not be bundled: {why}.", file=rel, fix="Delete it.")
+        if name.startswith("libSDL3.so") and b"SDL3SHIM_" not in p.read_bytes():
+            yield Finding("libs.sdl3", ERROR, f"{rel} is upstream SDL3. SDL3 games ship the sdl3-sdl2-backend shim, which hands video, audio and input to the CFW's SDL2 (fbdev, rotation, KMSDRM quirks).", file=rel,
+                          fix="Build against https://github.com/bmdhacks/SDL/tree/sdl2-backend and ship its libSDL3.so.0 instead.")
         for rx in data.COMMON_LIBS:
             if rx.match(name):
                 yield Finding("libs.common", WARN, f"{rel} is near-universal on CFW images; bundling only bloats the port.", file=rel,

@@ -28,6 +28,7 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - Never force `SDL_VIDEODRIVER`/`SDL_AUDIODRIVER` or any driver; the CFW selects it.
 - gl4es: source `libgl_${CFW_NAME}.txt` with a `libgl_default.txt` fallback. `SDL_VIDEO_GL_DRIVER`/`SDL_VIDEO_EGL_DRIVER` exports must be guarded on gl4es actually being in `LD_LIBRARY_PATH`.
 - Never `export LD_PRELOAD` before gptokeyb; prefix it on the game command only.
+- SDL3 games ship the sdl3-sdl2-backend shim as `libSDL3.so.0`, never upstream SDL3 (the rule checker reports upstream builds). A port must not carry its own display backend (fbdev/DRM output written by the game); SDL2 through the CFW, or the shim, does that.
 - Never bundle libSDL2, libGL/libEGL (outside gl4es.<arch>/), libGLES*, libmali, libdrm, libgbm, libwayland-*, glibc, libasound, libudev.
 - Never redirect `HOME` or `XDG_CONFIG_HOME` (PulseAudio symlink fails on FAT/exFAT). Use `bind_directories <target> <source>` / `bind_files`; the source path must be created (`mkdir -p` / `touch`) before the call or the bind silently does nothing.
 - Data archives: extract with `gunzip -c "$ARCHIVE" | tar --no-same-owner -xf -` (never `tar -xzf`).

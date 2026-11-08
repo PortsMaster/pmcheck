@@ -301,6 +301,21 @@ class ScriptNoise(unittest.TestCase):
         self.assertNotIn("sh.xdg", self.sh_rules('export XDG_DATA_HOME="$HOME/.local/share"\n'))
 
 
+class SDL3(unittest.TestCase):
+    def test_upstream_sdl3_is_error(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            libs = Path(t) / "testgame" / "libs.aarch64"
+            libs.mkdir()
+            shutil.copy(FIX / "hello.aarch64", libs / "libSDL3.so.0")
+            port = load(t)
+            try:
+                fs = {(f.rule, f.severity) for f in run_all(port) if f.rule.startswith("libs.")}
+            finally:
+                port.cleanup()
+            self.assertEqual(fs, {("libs.sdl3", "ERROR")})
+
+
 class PRLink(unittest.TestCase):
     def test_pr_number(self):
         from pmcheck.ghpr import pr_number
