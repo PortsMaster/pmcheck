@@ -14,6 +14,7 @@ from pathlib import Path
 from pmcheck.model import load, LoadError
 from pmcheck.rules import run_all
 from pmcheck.ini import check_ini
+from pmcheck.gptk import check_gptk
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -318,6 +319,40 @@ class Ini(unittest.TestCase):
     def test_good(self):
         txt = '[config]\ndeadzone_x = 10000\ndeadzone_y = 10000\n[controls]\na = "space"\nleft_analog_up = "up"\n'
         self.assertEqual([f.rule for f in check_ini(txt, "x.ini")], [])
+
+
+class Gptk(unittest.TestCase):
+    def rules(self, txt):
+        return [f.rule for f in check_gptk(txt, "x.gptk")]
+
+    def test_good(self):
+        txt = 'back = esc\nstart = enter\na = \\"\nb = space\nup = up\nup = repeat\nleft_analog_up = mouse_movement_up\nx = mouse_slow\ndeadzone_mode = scaled_radial\ndeadzone = 2000\n'
+        self.assertEqual(self.rules(txt), [])
+
+    def test_empty_value(self):
+        self.assertIn("gptk.empty", self.rules("a = \nb = space\n"))
+
+    def test_bad_key(self):
+        self.assertIn("gptk.key", self.rules("a = return\n"))
+
+    def test_select_is_back(self):
+        fs = list(check_gptk("select = esc\n", "x.gptk"))
+        self.assertEqual(fs[0].rule, "gptk.button")
+        self.assertEqual(fs[0].fix, "back = esc")
+
+    def test_classic_script_ok(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace('$GPTOKEYB2 "testgame.aarch64" &', '$GPTOKEYB "testgame.aarch64" -c "./testgame.gptk" &'))
+            (Path(t) / "testgame" / "testgame.gptk").write_text("back = esc\nstart = enter\n")
+            self.assertEqual(rules_of(t, "ERROR") | rules_of(t, "WARN"), set())
+
+    def test_sections_mean_gptokeyb2(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            (Path(t) / "testgame" / "testgame.gptk").write_text('[controls]\ny = "lshift"\n')
+            got = rules_of(t)
+            self.assertIn("ini.key", got)
+            self.assertFalse(any(r.startswith("gptk.") for r in got))
 
 
 class ZipSafety(unittest.TestCase):

@@ -12,6 +12,7 @@ from pathlib import Path
 from . import data
 from .findings import Finding, ERROR, WARN, INFO
 from .ini import check_ini
+from .gptk import check_gptk
 
 CHECKS = []
 
@@ -589,8 +590,6 @@ def _script(port, s):
         yield Finding("sh.pm_message-order", ERROR, "pm_message/pm_show_error take the message first, options after.", file=f, line=n)
     for n, l in grep(r"portmsg\.\$\{?DEVICE_ARCH|\./portmsg"):
         yield Finding("sh.portmsg", ERROR, "Don't call portmsg directly; use pm_message/pm_show_error.", file=f, line=n)
-    for n, l in grep(r"\$GPTOKEYB\b(?!2)|\.gptk\b"):
-        yield Finding("sh.gptokeyb1", WARN, "Classic gptokeyb/.gptk is superseded; new ports use $GPTOKEYB2 with an .ini.", file=f, line=n)
     for n, l in grep(r"(^|[;&|]\s*)sudo\s"):
         yield Finding("sh.sudo", WARN, "Use $ESUDO, not sudo.", file=f, line=n)
     for n, l in grep(r"\bpaste\b"):
@@ -637,8 +636,12 @@ def ini_files(port):
         if "[controls" not in text:
             continue
         yield from check_ini(text, port.rel(p), scripts)
-    for p in sorted(port.gamedir.glob("*.gptk")):
-        yield Finding("ini.gptk", WARN, f"{port.rel(p)}: classic .gptk; new ports use gptokeyb2 .ini.", file=port.rel(p))
+    for p in sorted(port.gamedir.rglob("*.gptk")):
+        text = port.read_text(p)
+        if "[controls" in text:      # gptokeyb2 reads any file name; sections mean gptokeyb2 format
+            yield from check_ini(text, port.rel(p), scripts)
+        else:
+            yield from check_gptk(text, port.rel(p))
 
 
 def run_all(port):

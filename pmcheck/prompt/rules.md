@@ -14,7 +14,7 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - A port that ships native aarch64 binaries sets `"arch": ["aarch64"]`, also when `runtime` is set.
 - No cover.png. No testing_thread.txt. No `## Compile` README section when the port only ships prebuilt loaders/runtimes (gmloader, box64, love, FRT ...).
 - Licence folder named `licenses/` or `license/`. A licence or distribution permission given as an image (e.g. a screenshot of the developer's permission).
-- gptokeyb2 `.ini`: a value of `\"` (unquoted backslash-quote) is gptokeyb2's explicit "no key" binding. Missing stick deadzones (the rule checker already notes it).
+- Classic gptokeyb and `.gptk` files. In both `.gptk` and gptokeyb2 `.ini`, a value of `\"` (unquoted backslash-quote) is the explicit "no key" binding. Missing stick deadzones (the rule checker already notes it).
 - PortMaster's standard GameMaker/gmloader template: `export LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"`, `export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"`, the 7zzs check, the `patcher.txt` block with `PATCHER_*` exports, `$ESUDO kill -9 $(pidof gptokeyb)` after the patcher, `tools/patchscript` with its own logging and `chmod 666 /dev/uinput`, `options.ini` with a `[Windows]` section when gmloader.json sets `force_platform`.
 - `pm_message "text"` without options (older template style). The log redirect `> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1`.
 
@@ -27,7 +27,7 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - Never redirect `HOME` or `XDG_CONFIG_HOME` (PulseAudio symlink fails on FAT/exFAT). Use `bind_directories <target> <source>` / `bind_files`; the source path must be created (`mkdir -p` / `touch`) before the call or the bind silently does nothing.
 - Data archives: extract with `gunzip -c "$ARCHIVE" | tar --no-same-owner -xf -` (never `tar -xzf`).
 - Player messages: `pm_message` / `pm_show_error`, never plain `echo` (that only reaches the log). Never call portmsg directly. `pm_finish` at the end. Use `$ESUDO`, never `sudo`.
-- Controls: new ports use gptokeyb2 (`$GPTOKEYB2`, `.ini`), not classic `.gptk`. Don't bind quit next to a primary action button.
+- Controls: classic gptokeyb (`$GPTOKEYB`, `.gptk`) and gptokeyb2 (`$GPTOKEYB2`, `.ini`) are both valid; never ask to switch. Don't bind quit next to a primary action button.
 - Runtimes: use PortMaster's runtime squashfs files (Westonpack, JDK, Mono, Godot/FRT ...) instead of bundling a runtime. `port.json` `runtime` uses catalog keys (e.g. `weston_pkg_0.2`), never display labels, no arch suffix.
 - port.json v4: `name` = `<gamedir>.zip`; `items` = script + game folder; one `porter` entry per person; `desc`/`inst` plain text; `inst` = setup instructions only (not controls); `store` entries are objects `{name, gameurl, developerurl}`; `min_glibc` = highest GLIBC_2.x of any shipped native binary.
 - gameinfo.xml: `<path>./Script Name.sh</path>`, `<image>./<gamedir>/screenshot.png</image>` (or cover.png if shipped), `<releasedate>YYYYMMDDT000000</releasedate>`.
