@@ -656,9 +656,12 @@ def _script(port, s):
         yield Finding("sh.log-old", WARN, "Old logging line.", file=f, line=n,
                       fix='> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1')
     # Control files referenced by the script
-    for n, l in grep(r"\$GPTOKEYB2\b"):
-        if "-c" not in l and port.gamedir is not None and any(port.gamedir.glob("*.ini")):
-            yield Finding("ini.unused", WARN, "An .ini ships but $GPTOKEYB2 is launched without -c.", file=f, line=n)
+    if port.gamedir is not None and not re.search(r"GPTOKEYB2?\}?\"?\s.*\s-c\b", body):
+        for p in sorted(port.gamedir.glob("*.ini")):
+            t = port.read_text(p)
+            if "[controls" in t and p.name not in body:
+                yield Finding("ini.unused", WARN, f"{port.rel(p)} looks like a gptokeyb2 config, but gptokeyb2 is launched without -c and nothing else uses it.",
+                              file=port.rel(p))
 
 
 def _resolve(port, path):
@@ -670,6 +673,21 @@ def _resolve(port, path):
     return None if "$" in p or "~" in p else Path(p)
 
 
+def _gptk_config(name, scripts):
+    """Is a control file with this name passed to gptokeyb with -c (by name, via a variable, or a path we can't resolve)?"""
+    code = "\n".join(l for l in scripts.splitlines() if not l.strip().startswith("#"))
+    c_lines = [l for l in code.splitlines() if re.search(r"gptokeyb", l, re.I) and re.search(r"\s-c\b", l)]
+    if not c_lines:
+        return False
+    if any(name in l for l in c_lines):
+        return True
+    holders = {m.group(1) for m in re.finditer(r"^\s*(?:export\s+|local\s+)?(\w+)=.*" + re.escape(name), code, re.M)}
+    if any(re.search(r"\$\{?" + v + r"\b", l) for v in holders for l in c_lines):
+        return True
+    # Not named anywhere in the script: assume a computed path like "$GAMEDIR/$BINARY.ini".
+    return name not in code
+
+
 @check
 def ini_files(port):
     if port.gamedir is None:
@@ -677,7 +695,7 @@ def ini_files(port):
     scripts = "\n".join(script_text(port, s) for s in port.scripts)
     for p in sorted(port.gamedir.glob("*.ini")):
         text = port.read_text(p)
-        if "[controls" not in text:
+        if "[controls" not in text or not _gptk_config(p.name, scripts):
             continue
         yield from check_ini(text, port.rel(p), scripts)
     for p in sorted(port.gamedir.rglob("*.gptk")):

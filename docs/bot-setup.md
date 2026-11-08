@@ -108,7 +108,7 @@ The service restarts on failure and starts again on reboot, because of the linge
    - After 10 to 60 seconds the bot posts the report once: inline when it's short, otherwise a one-line headline with `pmcheck-<port>.md` attached. The AI review is the last section.
 2. **A PR:** `/checkport url:https://github.com/PortsMaster/PortMaster-New/pull/<number>`. The bot downloads every port folder the PR adds or changes (`ports/<name>/`, at the PR's latest commit, up to 3 ports) and checks it with the strict PR layout. The report starts with the PR title.
 3. **Non-admin account:** the command is hidden, or answers *"This command is for PortMaster admins."*
-4. **A link from another site:** the bot answers *"Only https links from Discord or GitHub are accepted."*
+4. **A link from another site, or a GitHub page that is not a PR:** the bot answers *"Send a port .zip link (Discord attachment or GitHub release asset) or a PortMaster-New pull request link."*
 5. **darkspasm as a check:** the original zip gives 1 error (`min_glibc`), 1 warning (duplicate `r1` in the hotkey section) and 1 note.
 
 To follow checks live on the server: `journalctl --user -u pmcheck-bot -f`. Each check logs who ran it, the download, and the result:
@@ -144,6 +144,7 @@ systemctl --user restart pmcheck-bot
 | `check timed out` | The port is very large or the server is busy; raise `CHECK_TIMEOUT`. |
 | `AI review skipped: no GEMINI_API_KEY` | The key is missing from the env file. |
 | `AI review unavailable (HTTP 503 ...)` | Google's free Flash model is overloaded. The bot retries twice (5 s, 20 s), then falls back to `gemini-flash-lite-latest` (`PMCHECK_GEMINI_FALLBACK`, empty disables it). If all fail, run the check again later; the rules report is complete either way. |
+| A PR link answers `input is not a zip file or folder` | The bot is older than 0.1.4. Pull, rebuild and restart (step 12), then check `journalctl`: a PR check logs `/checkport PR #<n>`. |
 | `GitHub API rate limit reached` | More than 60 GitHub API calls in an hour from the server; set `GITHUB_TOKEN`. |
 | `AI review unavailable (no answer ... within 150s)` | The model hung; the bot already tried the fallback model. Run the check again. |
 | `AI review unavailable (HTTP 404 ...)` | The model name is retired; set `PMCHECK_GEMINI_MODEL=gemini-flash-latest` and restart. |

@@ -259,6 +259,23 @@ class HotkeyLicenceLog(unittest.TestCase):
             self.assertNotIn("sh.log-old", rules_of(t))
 
 
+class OtherIni(unittest.TestCase):
+    def test_helper_ini_not_gptokeyb(self):
+        with tempfile.TemporaryDirectory() as t:
+            sh = GOOD_SH.replace("./testgame.aarch64\n", 'layout="$GAMEDIR/helper.ini"\nHELPER_LAYOUT="$layout" ./testgame.aarch64\n')
+            make_port(t, sh=sh)
+            (Path(t) / "testgame" / "helper.ini").write_text("[controls]\na = context_click\nkind = wheel\n")
+            rules = rules_of(t)
+            self.assertFalse({r for r in rules if r.startswith("ini.")}, rules)
+
+    def test_ini_via_variable_checked(self):
+        with tempfile.TemporaryDirectory() as t:
+            sh = GOOD_SH.replace('$GPTOKEYB2 "testgame.aarch64" &', 'CTRL="$GAMEDIR/testgame.ini"\n$GPTOKEYB2 "testgame.aarch64" -c "$CTRL" &')
+            make_port(t, sh=sh)
+            (Path(t) / "testgame" / "testgame.ini").write_text("[controls]\na = return\n")
+            self.assertIn("ini.key", rules_of(t))
+
+
 class PRLink(unittest.TestCase):
     def test_pr_number(self):
         from pmcheck.ghpr import pr_number

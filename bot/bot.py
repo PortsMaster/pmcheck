@@ -49,6 +49,8 @@ def is_admin(member):
 
 def url_ok(url):
     u = urlparse(url)
+    if u.hostname == "github.com" and "/releases/download/" not in u.path and not u.path.lower().endswith(".zip"):
+        return False   # a GitHub web page, not a file
     return u.scheme == "https" and u.hostname in ALLOWED_HOSTS
 
 
@@ -60,6 +62,8 @@ async def download(url, dest):
                 raise ValueError(f"download failed: HTTP {r.status}")
             if r.url.host not in ALLOWED_HOSTS:
                 raise ValueError(f"redirected to a host that is not allowed: {r.url.host}")
+            if r.content_type.startswith("text/"):
+                raise ValueError("the link is a web page, not a zip file")
             size = 0
             total = int(r.headers.get("Content-Length") or 0)
             if total:
@@ -105,7 +109,7 @@ async def checkport(inter: discord.Interaction, url: str):
         return
     if not prn and not url_ok(url):
         log(f"  rejected: host {urlparse(url).hostname}")
-        await inter.response.send_message("Only https links from Discord or GitHub are accepted.", ephemeral=True)
+        await inter.response.send_message("Send a port .zip link (Discord attachment or GitHub release asset) or a PortMaster-New pull request link.", ephemeral=True)
         return
     if lock.locked():
         log("  rejected: another check is running")
