@@ -670,6 +670,9 @@ def _script(port, s):
     if not re.search(r"gptokeyb", body, re.I):
         yield Finding("sh.no-gptokeyb", ERROR, "No gptokeyb launched, so there is no hotkey exit (Select+Start).", file=f,
                       fix='Launch it before the game, e.g. $GPTOKEYB2 "$BINARY" & (no -c needed for the kill switch alone), or $GPTOKEYB "$BINARY" &.')
+    for n, l in grep(r"\b(kill\b.*\$\(\s*pidof\s+gptokeyb|pkill\b.*gptokeyb|killall\b.*gptokeyb)"):
+        yield Finding("sh.kill-gptokeyb", WARN, "Obsolete: pm_finish and patcher.txt already stop gptokeyb (pm_gptokeyb_finish).", file=f, line=n,
+                      fix="Delete the line.")
     for n, l in grep(r"^\s*exec\s*>\s*\"?\$\{?GAMEDIR\}?/log\.txt\"?\s*2>&1\s*$"):
         yield Finding("sh.log-old", WARN, "Old logging line.", file=f, line=n,
                       fix='> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1')

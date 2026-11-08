@@ -15,10 +15,9 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - No cover.png. No testing_thread.txt. No `## Compile` README section when the port only ships prebuilt loaders/runtimes (gmloader, box64, love, FRT ...).
 - Licence folder named `licenses/` or `license/`. A licence or distribution permission given as an image (e.g. a screenshot of the developer's permission).
 - Classic gptokeyb and `.gptk` files. In both `.gptk` and gptokeyb2 `.ini`, a value of `\"` (unquoted backslash-quote) is the explicit "no key" binding. Missing stick deadzones (the rule checker already notes it).
-- PortMaster's standard GameMaker/gmloader template: `export LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"`, `export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"`, the 7zzs check, the `patcher.txt` block with `PATCHER_*` exports, `$ESUDO kill -9 $(pidof gptokeyb)` after the patcher, `tools/patchscript` with its own logging and `chmod 666 /dev/uinput`, `options.ini` with a `[Windows]` section when gmloader.json sets `force_platform`.
+- PortMaster's standard GameMaker/gmloader template: `export LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"`, `export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"`, the 7zzs check, the `patcher.txt` block with `PATCHER_*` exports, `tools/patchscript` with its own logging and `chmod 666 /dev/uinput`, `options.ini` with a `[Windows]` section when gmloader.json sets `force_platform`.
 - `GAMEDIR="/$directory/ports/<name>"` and other unquoted or quoted variable assignments: `$directory` comes from control.txt, and an assignment never word-splits.
 - box64/box86 ports: the process takes the x86 binary's name, so `$GPTOKEYB "<x86 binary>"` (e.g. `FTL.amd64`) is the right kill target. Mono ports kill `mono`, Java ports `java`, LÖVE ports `love`.
-- `$ESUDO kill -9 $(pidof gptokeyb)` right after the patcher (template line), whichever gptokeyb the game uses later.
 - Licence and copyright years up to the current year (the input states today's date).
 - `echo` lines that only log progress or write state to a file; only an echo that is the last thing before an error `exit` is a problem, and the rule checker already reports those.
 - Duplicate `libfoo.so` + `libfoo.so.N` copies in Mono/.NET ports (P/Invoke opens the unversioned name).
@@ -32,6 +31,7 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - Never bundle libSDL2, libGL/libEGL (outside gl4es.<arch>/), libGLES*, libmali, libdrm, libgbm, libwayland-*, glibc, libasound, libudev.
 - Never redirect `HOME` or `XDG_CONFIG_HOME` (PulseAudio symlink fails on FAT/exFAT). Use `bind_directories <target> <source>` / `bind_files`; the source path must be created (`mkdir -p` / `touch`) before the call or the bind silently does nothing.
 - Data archives: extract with `gunzip -c "$ARCHIVE" | tar --no-same-owner -xf -` (never `tar -xzf`).
+- Don't kill gptokeyb by hand (`kill -9 $(pidof gptokeyb)`, `pkill gptokeyb`): `pm_finish` and `patcher.txt` already do it (`pm_gptokeyb_finish`). The rule checker reports it.
 - Player messages: `pm_message` / `pm_show_error`, never plain `echo` (that only reaches the log). Never call portmsg directly. `pm_finish` at the end. Use `$ESUDO`, never `sudo`.
 - Controls: every port launches gptokeyb (classic `$GPTOKEYB` with `.gptk`, or `$GPTOKEYB2` with `.ini`; both are valid, never ask to switch) for the Select+Start hotkey exit. Its kill target must be the process that actually runs (e.g. `java`, `love`, the interpreter), or the hotkey does nothing. Don't bind quit next to a primary action button.
 - Runtimes: use PortMaster's runtime squashfs files (Westonpack, JDK, Mono, Godot/FRT ...) instead of bundling a runtime. `port.json` `runtime` uses catalog keys (e.g. `weston_pkg_0.2`), never display labels, no arch suffix.

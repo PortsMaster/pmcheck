@@ -294,6 +294,9 @@ class ScriptNoise(unittest.TestCase):
         r = self.sh_rules('mkdir -p "$GAMEDIR/savedata"\nbind_directories "$HOME/.local/share/Some Studio/Game" "$GAMEDIR/savedata"\n')
         self.assertNotIn("sh.bind-source", r)
 
+    def test_kill_gptokeyb_obsolete(self):
+        self.assertIn("sh.kill-gptokeyb", self.sh_rules('$ESUDO kill -9 $(pidof gptokeyb) 2>/dev/null\n'))
+
     def test_xdg_default_ok(self):
         self.assertNotIn("sh.xdg", self.sh_rules('export XDG_DATA_HOME="$HOME/.local/share"\n'))
 
