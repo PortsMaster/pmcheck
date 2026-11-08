@@ -140,6 +140,7 @@ systemctl --user restart pmcheck-bot
 | `download failed: HTTP 404/403` | The Discord attachment link expired (they're signed for about 24 h); copy a fresh link. |
 | `check timed out` | The port is very large or the server is busy; raise `CHECK_TIMEOUT`. |
 | `AI review skipped: no GEMINI_API_KEY` | The key is missing from the env file. |
+| `AI review unavailable (HTTP 503 ...)` | Google's free Flash model is overloaded. The bot retries twice (5 s, 20 s), then falls back to `gemini-flash-lite-latest` (`PMCHECK_GEMINI_FALLBACK`, empty disables it). If all fail, run the check again later; the rules report is complete either way. |
 | `AI review unavailable (HTTP 404 ...)` | The model name is retired; set `PMCHECK_GEMINI_MODEL=gemini-flash-latest` and restart. |
 
 ## Security summary

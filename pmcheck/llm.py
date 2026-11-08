@@ -3,11 +3,13 @@ import json
 import os
 import re
 import urllib.error
+import time
 import urllib.request
 from pathlib import Path
 
 API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 DEFAULT_MODEL = "gemini-flash-latest"
+FALLBACK_MODEL = "gemini-flash-lite-latest"
 MAX_CHARS = 400_000          # well inside Flash's context; keeps the free-tier token budget sane
 MAX_FILE_CHARS = 60_000
 TEXT_NAMES = re.compile(r"(\.sh|\.bash|\.ini|\.gptk|\.json|\.xml|\.md|\.txt|\.cfg|\.conf|\.py)$", re.I)
@@ -124,6 +126,31 @@ def build_input(port, findings):
     return "\n\n".join(parts)
 
 
+RETRY_CODES = {429, 500, 502, 503, 504}
+RETRY_DELAYS = (0, 5, 20)
+
+
+def _call(model, body, api_key, timeout):
+    """Returns (response, error text, HTTP code)."""
+    req = urllib.request.Request(
+        API.format(model=model), data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key}, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.load(r), None, 200
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.loads(e.read())["error"]["message"][:200].rstrip(". ")
+        except Exception:
+            msg = ""
+        hint = {429: ", rate limited", 503: ", Gemini overloaded, try again later",
+                404: f", model {model!r} not found, set PMCHECK_GEMINI_MODEL"}.get(e.code, "")
+        return None, f"AI review unavailable (HTTP {e.code}{hint}){': ' + msg if msg else ''}.", e.code
+    except (urllib.error.URLError, TimeoutError, ValueError) as e:
+        return None, f"AI review unavailable ({e.__class__.__name__}).", None
+
+
 def review(port, findings, api_key=None, model=None, timeout=180):
     """Returns a list of dicts, or a string explaining why there is no AI review."""
     api_key = api_key or os.environ.get("GEMINI_API_KEY")
@@ -143,22 +170,22 @@ def review(port, findings, api_key=None, model=None, timeout=180):
             "responseSchema": SCHEMA,
         },
     }
-    req = urllib.request.Request(
-        API.format(model=model), data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json", "x-goog-api-key": api_key}, method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            resp = json.load(r)
-    except urllib.error.HTTPError as e:
-        try:
-            msg = json.loads(e.read())["error"]["message"][:200]
-        except Exception:
-            msg = ""
-        hint = ", rate limited" if e.code == 429 else f", model {model!r} not found, set PMCHECK_GEMINI_MODEL" if e.code == 404 else ""
-        return f"AI review unavailable (HTTP {e.code}{hint}){': ' + msg if msg else ''}."
-    except (urllib.error.URLError, TimeoutError, ValueError) as e:
-        return f"AI review unavailable ({e.__class__.__name__})."
+    models = [model]
+    fallback = os.environ.get("PMCHECK_GEMINI_FALLBACK", FALLBACK_MODEL)
+    if fallback and fallback != model:
+        models.append(fallback)
+    resp = err = None
+    for m in models:
+        for delay in RETRY_DELAYS:
+            if delay:
+                time.sleep(delay)
+            resp, err, code = _call(m, body, api_key, timeout)
+            if resp is not None or code not in RETRY_CODES:
+                break
+        if resp is not None or code not in RETRY_CODES:
+            break
+    if resp is None:
+        return err
     try:
         text = resp["candidates"][0]["content"]["parts"][0]["text"]
         items = json.loads(text)
