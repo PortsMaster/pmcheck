@@ -209,6 +209,30 @@ class Relaxed(unittest.TestCase):
             self.assertIn("readme.section", rules_of(t))
 
 
+    def test_readme_rename_hint(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            gd = Path(t) / "testgame"
+            (gd / "README.md").rename(gd / "testgame.md")
+            port = load(t)
+            try:
+                f = [f for f in run_all(port) if f.rule == "files.missing"]
+            finally:
+                port.cleanup()
+            self.assertEqual(len(f), 1)
+            self.assertIn("Rename testgame/testgame.md to testgame/README.md", f[0].fix)
+
+
+class PRLink(unittest.TestCase):
+    def test_pr_number(self):
+        from pmcheck.ghpr import pr_number
+        self.assertEqual(pr_number("https://github.com/PortsMaster/PortMaster-New/pull/2853"), 2853)
+        self.assertEqual(pr_number("https://github.com/PortsMaster/PortMaster-New/pull/2853/files"), 2853)
+        self.assertIsNone(pr_number("https://github.com/someone/PortMaster-New/pull/1"))
+        self.assertIsNone(pr_number("http://github.com/PortsMaster/PortMaster-New/pull/1"))
+        self.assertIsNone(pr_number("https://github.com.evil.example/PortsMaster/PortMaster-New/pull/1"))
+
+
 class BadPorts(unittest.TestCase):
     def check(self, rule, **over):
         with tempfile.TemporaryDirectory() as t:

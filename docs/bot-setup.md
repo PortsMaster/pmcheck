@@ -76,9 +76,11 @@ GEMINI_API_KEY=<key from step 4>
 PMCHECK_GEMINI_MODEL=gemini-flash-latest
 MAX_DOWNLOAD_MB=1024
 CHECK_TIMEOUT=900
+GITHUB_TOKEN=
 ```
 - `gemini-flash-latest` follows Google's current Flash model, so retirements don't break it. To pin a model, list the ones your key can use:
   `curl -s -H "x-goog-api-key: $GEMINI_API_KEY" https://generativelanguage.googleapis.com/v1beta/models | grep '"name"'`
+- `GITHUB_TOKEN` is optional. PR links use the GitHub API, about 5 calls per check; without a token GitHub allows 60 calls per hour per server IP. For more, create a fine-grained token at https://github.com/settings/personal-access-tokens with *Public repositories (read-only)* and no permissions.
 - The bot refuses to start when `ADMIN_ROLE_IDS` is empty.
 
 ## 8. First run in the foreground
@@ -104,9 +106,10 @@ The service restarts on failure and starts again on reboot, because of the linge
 1. **Admin:** run `/checkport url:<link to a port zip>`.
    - To get a link, right-click a zip attachment in Discord and choose **Copy Link**. A GitHub release asset link also works.
    - After 10 to 60 seconds the bot posts the report once: inline when it's short, otherwise a one-line headline with `pmcheck-<port>.md` attached. The AI review is the last section.
-2. **Non-admin account:** the command is hidden, or answers *"This command is for PortMaster admins."*
-3. **A link from another site:** the bot answers *"Only https links from Discord or GitHub are accepted."*
-4. **darkspasm as a check:** the original zip gives 1 error (`min_glibc`), 1 warning (duplicate `r1` in the hotkey section) and 1 note.
+2. **A PR:** `/checkport url:https://github.com/PortsMaster/PortMaster-New/pull/<number>`. The bot downloads every port folder the PR adds or changes (`ports/<name>/`, at the PR's latest commit, up to 3 ports) and checks it with the strict PR layout. The report starts with the PR title.
+3. **Non-admin account:** the command is hidden, or answers *"This command is for PortMaster admins."*
+4. **A link from another site:** the bot answers *"Only https links from Discord or GitHub are accepted."*
+5. **darkspasm as a check:** the original zip gives 1 error (`min_glibc`), 1 warning (duplicate `r1` in the hotkey section) and 1 note.
 
 To follow checks live on the server: `journalctl --user -u pmcheck-bot -f`. Each check logs who ran it, the download, and the result:
 ```
@@ -141,6 +144,8 @@ systemctl --user restart pmcheck-bot
 | `check timed out` | The port is very large or the server is busy; raise `CHECK_TIMEOUT`. |
 | `AI review skipped: no GEMINI_API_KEY` | The key is missing from the env file. |
 | `AI review unavailable (HTTP 503 ...)` | Google's free Flash model is overloaded. The bot retries twice (5 s, 20 s), then falls back to `gemini-flash-lite-latest` (`PMCHECK_GEMINI_FALLBACK`, empty disables it). If all fail, run the check again later; the rules report is complete either way. |
+| `GitHub API rate limit reached` | More than 60 GitHub API calls in an hour from the server; set `GITHUB_TOKEN`. |
+| `AI review unavailable (no answer ... within 150s)` | The model hung; the bot already tried the fallback model. Run the check again. |
 | `AI review unavailable (HTTP 404 ...)` | The model name is retired; set `PMCHECK_GEMINI_MODEL=gemini-flash-latest` and restart. |
 
 ## Security summary

@@ -1,6 +1,6 @@
 """pmcheck CLI.
 
-  python -m pmcheck <zip|folder> [--pr] [--format md|json|github] [--ai] [--warn-only]
+  python -m pmcheck <zip|folder|PortMaster-New PR link> [--pr] [--format md|json|github] [--ai] [--warn-only]
   python -m pmcheck --sweep <PortMaster-New/ports>     rule hit counts across many ports
 """
 import argparse
@@ -57,6 +57,23 @@ def main(argv=None):
         for (sev, rule), n in sorted(ports_with.items(), key=lambda kv: -kv[1]):
             print(f"{n:5} ports  {hits[(sev, rule)]:6} hits  {sev:5} {rule}")
         return 0
+
+    from . import ghpr
+    if ghpr.pr_number(a.path):
+        import shutil, tempfile
+        tmp = tempfile.mkdtemp(prefix="pmcheck-pr-")
+        try:
+            info, dirs = ghpr.fetch(a.path, tmp, 2 << 30, log=lambda m: print(m, file=sys.stderr))
+            rc = 0
+            for d in dirs:
+                rc = max(rc, main([str(d), "--pr", "--format", a.format, "--prefix", f"ports/{d.name}/"]
+                                  + (["--ai"] if a.ai else []) + (["--warn-only"] if a.warn_only else [])))
+            return rc
+        except ghpr.PRError as e:
+            print(f"pmcheck: {e}", file=sys.stderr)
+            return 2
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     try:
         name, findings, ai = check_one(a.path, a.ai, a.pr)

@@ -2,8 +2,8 @@
 
 A static packaging checker for PortMaster ports. It only parses files and runs `readelf`/`objdump`/`shellcheck`, and never executes port code.
 
-- **Library + CLI**: `pmcheck <zip|folder> [--pr] [--format md|json|github] [--ai] [--warn-only]`. Testing zips accept either layout; `--pr` enforces the PortMaster-New layout.
-- **Discord bot**: `/checkport <url>`, admin roles only (rules + Gemini advisory review). Setup: `docs/bot-setup.md`.
+- **Library + CLI**: `pmcheck <zip|folder|PR link> [--pr] [--format md|json|github] [--ai] [--warn-only]`. Testing zips accept either layout; `--pr` enforces the PortMaster-New layout. A `https://github.com/PortsMaster/PortMaster-New/pull/<n>` link downloads and checks the ports that PR touches.
+- **Discord bot**: `/checkport <url or PR link>`, admin roles only (rules + Gemini advisory review). Setup: `docs/bot-setup.md`.
 - **PR check**: `workflows/port_check.yaml` → copy it to `PortMaster-New/.github/workflows/`. Rules only.
 
 ## Run

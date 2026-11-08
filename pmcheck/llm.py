@@ -3,6 +3,7 @@ import json
 import os
 import re
 import urllib.error
+import socket
 import time
 import urllib.request
 from pathlib import Path
@@ -126,7 +127,7 @@ def build_input(port, findings):
     return "\n\n".join(parts)
 
 
-RETRY_CODES = {429, 500, 502, 503, 504}
+RETRY_CODES = {429, 500, 502, 503, 504, "timeout"}
 RETRY_DELAYS = (0, 5, 20)
 
 
@@ -147,11 +148,17 @@ def _call(model, body, api_key, timeout):
         hint = {429: ", rate limited", 503: ", Gemini overloaded, try again later",
                 404: f", model {model!r} not found, set PMCHECK_GEMINI_MODEL"}.get(e.code, "")
         return None, f"AI review unavailable (HTTP {e.code}{hint}){': ' + msg if msg else ''}.", e.code
-    except (urllib.error.URLError, TimeoutError, ValueError) as e:
+    except (TimeoutError, socket.timeout):
+        return None, f"AI review unavailable (no answer from {model} within {timeout}s).", "timeout"
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, (TimeoutError, socket.timeout)):
+            return None, f"AI review unavailable (no answer from {model} within {timeout}s).", "timeout"
+        return None, f"AI review unavailable ({e.__class__.__name__}).", None
+    except ValueError as e:
         return None, f"AI review unavailable ({e.__class__.__name__}).", None
 
 
-def review(port, findings, api_key=None, model=None, timeout=180):
+def review(port, findings, api_key=None, model=None, timeout=150):
     """Returns a list of dicts, or a string explaining why there is no AI review."""
     api_key = api_key or os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -180,7 +187,7 @@ def review(port, findings, api_key=None, model=None, timeout=180):
             if delay:
                 time.sleep(delay)
             resp, err, code = _call(m, body, api_key, timeout)
-            if resp is not None or code not in RETRY_CODES:
+            if resp is not None or code not in RETRY_CODES or code == "timeout":
                 break
         if resp is not None or code not in RETRY_CODES:
             break

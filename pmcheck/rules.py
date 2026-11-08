@@ -177,7 +177,12 @@ def required_files(port):
     for name, sev in (("port.json", ERROR), ("README.md", ERROR), ("gameinfo.xml", ERROR),
                       ("screenshot.png", ERROR)):
         if port.meta_file(name) is None and not (name == "screenshot.png" and port.meta_file("screenshot.jpg")):
-            yield Finding("files.missing", sev, f"Missing {name} ({where}).")
+            fix = ""
+            if name == "README.md":
+                md = [f for d in port.meta_dirs() for f in sorted(d.glob("*")) if f.is_file() and f.suffix.lower() == ".md"]
+                if md:
+                    fix = f"Rename {port.rel(md[0])} to {port.rel(md[0].parent / 'README.md')}."
+            yield Finding("files.missing", sev, f"Missing {name} ({where}).", fix=fix)
     for c in port.files():
         if c.name.lower() == "cover.png" and c.parent not in port.meta_dirs():
             yield Finding("files.cover-location", WARN, f"{port.rel(c)} is in the wrong place; cover.png goes {where}.", file=port.rel(c))
@@ -413,7 +418,7 @@ def binaries(port):
         if data.GL_LIBS.match(name) and not _in_gl4es(p):
             yield Finding("libs.banned", ERROR, f"{rel}: libGL/libEGL outside a gl4es.<arch>/ folder.", file=rel)
         for rx, why in data.BANNED_LIBS:
-            if rx.match(name):
+            if rx.match(name) and not (name.startswith("libSDL3") and b"SDL3SHIM_" in p.read_bytes()):
                 yield Finding("libs.banned", ERROR, f"{rel} must not be bundled: {why}.", file=rel, fix="Delete it.")
         for rx in data.COMMON_LIBS:
             if rx.match(name):

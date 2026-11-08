@@ -2,7 +2,8 @@
 
 Env (see config.example.env):
   DISCORD_TOKEN, GUILD_ID, ADMIN_ROLE_IDS (comma separated), GEMINI_API_KEY,
-  PMCHECK_GEMINI_MODEL (optional), MAX_DOWNLOAD_MB (default 1024), CHECK_TIMEOUT (default 900)
+  PMCHECK_GEMINI_MODEL (optional), MAX_DOWNLOAD_MB (default 1024), CHECK_TIMEOUT (default 900),
+  GITHUB_TOKEN (optional, read-only; raises the GitHub API limit for PR links)
 """
 import asyncio
 import io
@@ -18,6 +19,8 @@ from urllib.parse import urlparse
 import aiohttp
 import discord
 from discord import app_commands
+
+from pmcheck import ghpr
 
 ALLOWED_HOSTS = {
     "cdn.discordapp.com", "media.discordapp.net",
@@ -70,9 +73,9 @@ async def download(url, dest):
             return size
 
 
-async def run_pmcheck(zip_path, fmt):
+async def run_pmcheck(zip_path, fmt, pr=False):
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-I", "-m", "pmcheck", str(zip_path), "--format", fmt, "--ai", "--warn-only",
+        sys.executable, "-I", "-m", "pmcheck", str(zip_path), "--format", fmt, "--ai", "--warn-only", *(["--pr"] if pr else []),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     try:
@@ -86,17 +89,18 @@ async def run_pmcheck(zip_path, fmt):
 
 
 @tree.command(name="checkport", description="Check a PortMaster port zip against the packaging guidelines", guild=GUILD)
-@app_commands.describe(url="Link to the port .zip (Discord attachment or GitHub)")
+@app_commands.describe(url="Port .zip link (Discord attachment or GitHub) or a PortMaster-New pull request link")
 @app_commands.default_permissions(manage_messages=True)
 @app_commands.guild_only()
 async def checkport(inter: discord.Interaction, url: str):
-    name = Path(urlparse(url).path).name or "?"
+    prn = ghpr.pr_number(url)
+    name = f"PR #{prn}" if prn else (Path(urlparse(url).path).name or "?")
     log(f"/checkport {name} by {inter.user}")
     if not is_admin(inter.user):
         log("  rejected: not an admin")
         await inter.response.send_message("This command is for PortMaster admins.", ephemeral=True)
         return
-    if not url_ok(url):
+    if not prn and not url_ok(url):
         log(f"  rejected: host {urlparse(url).hostname}")
         await inter.response.send_message("Only https links from Discord or GitHub are accepted.", ephemeral=True)
         return
@@ -108,17 +112,24 @@ async def checkport(inter: discord.Interaction, url: str):
     async with lock:
         tmp = Path(tempfile.mkdtemp(prefix="pmbot-"))
         try:
-            zip_path = tmp / "port.zip"
             t0 = time.monotonic()
-            size = await download(url, zip_path)
-            log(f"  downloaded {size / 1048576:.1f} MB in {time.monotonic() - t0:.0f}s; running rules + AI review")
-            t1 = time.monotonic()
-            result = json.loads(await run_pmcheck(zip_path, "json"))
-            md = await run_pmcheck_md_from(result)
-            c = result["counts"]
-            ai = result.get("ai")
-            ai_state = f"{len(ai)} AI notes" if isinstance(ai, list) else (ai or "no AI")
-            log(f"  done in {time.monotonic() - t1:.0f}s: {c['ERROR']} errors, {c['WARN']} warnings, {c['INFO']} notes; {ai_state}")
+            if prn:
+                info, targets = await asyncio.to_thread(ghpr.fetch, url, tmp / "ports", MAX_BYTES, log)
+                title = f"PR #{prn}: {info['title']}" + ("" if info["state"] == "open" else f" ({info['state']})")
+            else:
+                targets, title = [tmp / "port.zip"], None
+                size = await download(url, targets[0])
+            log(f"  downloaded in {time.monotonic() - t0:.0f}s; running rules + AI review")
+            results, mds = [], []
+            for target in targets:
+                t1 = time.monotonic()
+                result = json.loads(await run_pmcheck(target, "json", pr=bool(prn)))
+                results.append(result)
+                mds.append(await run_pmcheck_md_from(result))
+                c = result["counts"]
+                ai = result.get("ai")
+                ai_state = f"{len(ai)} AI notes" if isinstance(ai, list) else (ai or "no AI")
+                log(f"  {result['port']} done in {time.monotonic() - t1:.0f}s: {c['ERROR']} errors, {c['WARN']} warnings, {c['INFO']} notes; {ai_state}")
         except (ValueError, aiohttp.ClientError, json.JSONDecodeError) as e:
             log(f"  failed: {e}")
             await inter.followup.send(f"❌ Check failed: {e}")
@@ -126,13 +137,16 @@ async def checkport(inter: discord.Interaction, url: str):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
     # One output only: the full report inline when it fits, otherwise a headline plus the report as a file.
+    md = "\n\n---\n\n".join(mds)
+    if title:
+        md = f"**{title}**\n<{url}>\n\n{md}"
     if len(md) <= 1900:
         await inter.followup.send(md)
         return
-    c = result["counts"]
-    head = f"**{result['port']}**: {c['ERROR']} errors, {c['WARN']} warnings, {c['INFO']} notes. Full report attached."
-    file = discord.File(io.BytesIO(md.encode()), filename=f"pmcheck-{result['port']}.md")
-    await inter.followup.send(head, file=file)
+    counts = "; ".join(f"**{r['port']}**: {r['counts']['ERROR']} errors, {r['counts']['WARN']} warnings, {r['counts']['INFO']} notes" for r in results)
+    head = (f"**{title}**\n" if title else "") + counts + ". Full report attached."
+    fname = f"pmcheck-pr{prn}.md" if prn else f"pmcheck-{results[0]['port']}.md"
+    await inter.followup.send(head, file=discord.File(io.BytesIO(md.encode()), filename=fname))
 
 
 async def run_pmcheck_md_from(result):
