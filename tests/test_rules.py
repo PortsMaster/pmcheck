@@ -276,6 +276,28 @@ class OtherIni(unittest.TestCase):
             self.assertIn("ini.key", rules_of(t))
 
 
+class ScriptNoise(unittest.TestCase):
+    def sh_rules(self, extra):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace('cd "$GAMEDIR"\n', 'cd "$GAMEDIR"\n' + extra))
+            return rules_of(t)
+
+    def test_echo_progress_and_state_ok(self):
+        r = self.sh_rules('echo "Creating swap..."\n$ESUDO zramctl --find || {\n  echo "1" > "$GAMEDIR/state"\n  exit 1\n}\n')
+        self.assertNotIn("sh.echo-message", r)
+
+    def test_echo_before_exit_flagged(self):
+        r = self.sh_rules('if [ ! -f x ]; then\n  echo "Game files missing"\n  exit 1\nfi\n')
+        self.assertIn("sh.echo-message", r)
+
+    def test_bind_quoted_target_with_spaces(self):
+        r = self.sh_rules('mkdir -p "$GAMEDIR/savedata"\nbind_directories "$HOME/.local/share/Some Studio/Game" "$GAMEDIR/savedata"\n')
+        self.assertNotIn("sh.bind-source", r)
+
+    def test_xdg_default_ok(self):
+        self.assertNotIn("sh.xdg", self.sh_rules('export XDG_DATA_HOME="$HOME/.local/share"\n'))
+
+
 class PRLink(unittest.TestCase):
     def test_pr_number(self):
         from pmcheck.ghpr import pr_number

@@ -16,6 +16,12 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - Licence folder named `licenses/` or `license/`. A licence or distribution permission given as an image (e.g. a screenshot of the developer's permission).
 - Classic gptokeyb and `.gptk` files. In both `.gptk` and gptokeyb2 `.ini`, a value of `\"` (unquoted backslash-quote) is the explicit "no key" binding. Missing stick deadzones (the rule checker already notes it).
 - PortMaster's standard GameMaker/gmloader template: `export LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"`, `export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"`, the 7zzs check, the `patcher.txt` block with `PATCHER_*` exports, `$ESUDO kill -9 $(pidof gptokeyb)` after the patcher, `tools/patchscript` with its own logging and `chmod 666 /dev/uinput`, `options.ini` with a `[Windows]` section when gmloader.json sets `force_platform`.
+- `GAMEDIR="/$directory/ports/<name>"` and other unquoted or quoted variable assignments: `$directory` comes from control.txt, and an assignment never word-splits.
+- box64/box86 ports: the process takes the x86 binary's name, so `$GPTOKEYB "<x86 binary>"` (e.g. `FTL.amd64`) is the right kill target. Mono ports kill `mono`, Java ports `java`, LÖVE ports `love`.
+- `$ESUDO kill -9 $(pidof gptokeyb)` right after the patcher (template line), whichever gptokeyb the game uses later.
+- Licence and copyright years up to the current year (the input states today's date).
+- `echo` lines that only log progress or write state to a file; only an echo that is the last thing before an error `exit` is a problem, and the rule checker already reports those.
+- Duplicate `libfoo.so` + `libfoo.so.N` copies in Mono/.NET ports (P/Invoke opens the unversioned name).
 - `pm_message "text"` without options (older template style). The log redirect `> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1` (the old `exec > "$GAMEDIR/log.txt" 2>&1` is flagged by the rule checker).
 
 ## Hard rules

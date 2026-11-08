@@ -1,6 +1,7 @@
 """All checks. Each check takes a Port and yields Findings. Nothing here executes port code."""
 import json
 import re
+import shlex
 import shutil
 import struct
 import subprocess
@@ -150,7 +151,7 @@ def structure(port):
             "structure.too-many-files", WARN,
             f"{count} files in the package (limit {data.LOOSE_FILE_LIMIT}). Pack the bulk data into a .tar.gz extracted on first launch."
             + (f" Largest folders by file count: {', '.join(biggest)}." if biggest else ""),
-            fix="Leave the binary, libs.aarch64/, licenses/ and the control .ini outside the archive.",
+            fix="Leave the binary, the library folder (libs.aarch64/, libs/), licenses/ and the control .ini outside the archive.",
             snippet=data.TAR_SNIPPET.format(folders=folders, guard=f"{biggest[0] if biggest else 'gamedata'}/<some-known-file>"),
         )
 
@@ -164,7 +165,7 @@ def _biggest_subdirs(port, n=3):
             rel = p.relative_to(port.gamedir)
         except ValueError:
             continue
-        if len(rel.parts) > 1 and not rel.parts[0].startswith(("libs.", "gl4es", "licenses", "license")):
+        if len(rel.parts) > 1 and not rel.parts[0].startswith(("libs.", "gl4es", "licenses", "license")) and rel.parts[0] not in ("libs", "lib"):
             counts[rel.parts[0]] = counts.get(rel.parts[0], 0) + 1
     return [k for k, v in sorted(counts.items(), key=lambda kv: -kv[1]) if v > 10][:n]
 
@@ -427,6 +428,8 @@ def binaries(port):
         so = elf_info(p)["soname"]
         if so and p.name != so and p.name not in scripts_all:
             if (p.parent / so).exists():
+                if re.search(r"\bmono\b|dotnet", scripts_all, re.I):
+                    continue   # .NET P/Invoke opens the unversioned name, native libs NEED the SONAME: both copies are used
                 yield Finding("libs.duplicate", WARN, f"{rel} duplicates {so} in the same folder; ship only {so}.", file=rel, fix="Delete it.")
             else:
                 yield Finding("libs.soname", WARN, f"{rel} should be named after its SONAME {so!r}.", file=rel)
@@ -503,7 +506,8 @@ def licences(port):
             continue  # the port's own executables
         stem = re.sub(r"^lib", "", p.name.split(".so")[0]).lower()
         stem = re.sub(r"[-.]\d+(\.\d+)*$", "", stem)
-        cands = {re.sub(r"[^a-z0-9]", "", stem), re.split(r"[_\-.]", stem)[0], re.sub(r"file$", "", stem)}
+        camel = re.split(r"(?<=[a-z])(?=[A-Z])", re.sub(r"^lib", "", p.name.split(".so")[0]))[0].lower()
+        cands = {re.sub(r"[^a-z0-9]", "", stem), re.split(r"[_\-.]", stem)[0], re.sub(r"file$", "", stem), camel}
         cands = {c for c in cands if len(c) > 2}
         if cands and not any(c in squashed for c in cands):
             yield Finding("licenses.component", WARN, f"No licence found mentioning {stem!r} ({port.rel(p)}).", file=port.rel(p),
@@ -603,24 +607,38 @@ def _script(port, s):
     for n, l in grep(r"XDG_DATA_HOME=|XDG_CACHE_HOME="):
         if BOILER.match(l.strip()) and "${XDG_DATA_HOME:-" in l:
             continue
+        if re.search(r"XDG_(DATA|CACHE)_HOME=\"?(\$HOME|\$\{HOME\}|~)/\.(local/share|cache)\"?\s*$", l):
+            continue   # just the default location
         yield Finding("sh.xdg", INFO, "Redirecting a whole XDG root; prefer bind_directories for the game's own folder.", file=f, line=n)
     for n, l in grep(r"^\s*bind_(directories|files)\s"):
-        m = re.match(r"\s*bind_(directories|files)\s+(\S+)\s+(\S+)", l)
-        if not m:
+        try:
+            args = shlex.split(l.split("#")[0] if " #" in l else l)
+        except ValueError:
             continue
-        src = m.group(3).strip("\"'")
+        if len(args) < 3:
+            continue
+        m = re.match(r"\s*bind_(directories|files)", l)
+        src = args[2]
         before = "\n".join(x for k, x in code if k < n)
         verb = "mkdir" if m.group(1) == "directories" else "touch"
         shipped = _resolve(port, src)
         if shipped is not None and shipped.exists():
             continue
-        if not re.search(rf"{verb}\b[^\n]*{re.escape(src)}", before):
+        if not re.search(rf"{verb}\b[^\n]*{re.escape(src)}\"?(\s|$)", before, re.M):
             yield Finding("sh.bind-source", WARN, f"bind_{m.group(1)} source {src} must exist first ({verb} it before this line), or the bind silently no-ops.",
                           file=f, line=n)
     for i, (n, l) in enumerate(code):
-        after = [x for _, x in code[i + 1:i + 4]]
-        near = [x for _, x in code[max(0, i - 2):i]] + after
-        if (re.match(r"\s*echo\s+[\"']", l) and ">" not in l and any(re.match(r"\s*exit\s+[1-9]", x) for x in after)
+        if not re.match(r"\s*echo\s+[\"']", l) or re.search(r"[>|]|\)\s*$", l):
+            continue   # echo that writes a file or feeds a pipe is not a player message
+        # Only an echo that is the last thing before an error exit: nothing but cleanup in between.
+        nxt = None
+        for _, x in code[i + 1:i + 6]:
+            if re.match(r"\s*$|\s*(echo\b|\$ESUDO\s+umount|umount|rm\s|sleep\s|\}|fi\b)", x):
+                continue
+            nxt = x
+            break
+        near = [x for _, x in code[max(0, i - 2):i + 4]]
+        if (nxt is not None and re.match(r"\s*exit\s+[1-9]", nxt)
                 and not any(re.search(r"\bpm_(message|show_error)\b", x) for x in near)):
             yield Finding("sh.echo-message", WARN, "This message goes to the log, the player never sees it before the exit.", file=f, line=n,
                           fix='pm_show_error "..." --title "..."   (or pm_message on older templates)')

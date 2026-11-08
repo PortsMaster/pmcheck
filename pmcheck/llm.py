@@ -1,4 +1,5 @@
 """Optional Gemini review of the port's text files. Advisory only; never decides pass/fail."""
+import datetime
 import json
 import os
 import re
@@ -98,7 +99,7 @@ def _numbered(text):
 
 
 def build_input(port, findings):
-    parts = ["## File tree"]
+    parts = [f"Today's date: {datetime.date.today().isoformat()}. Dates up to today are not in the future.", "## File tree"]
     files = port.logical_files()
     tree = [f"{port.rel(p)}  ({p.stat().st_size} bytes)" for p in files]
     if len(tree) > 400:
@@ -198,8 +199,19 @@ def review(port, findings, api_key=None, model=None, timeout=150):
         items = json.loads(text)
     except (KeyError, IndexError, ValueError):
         return "AI review returned no usable answer."
+    lengths = {port.rel(p): len(port.read_text(p).splitlines()) for p in port.logical_files() if TEXT_NAMES.search(p.name)}
     out = []
     for it in items if isinstance(items, list) else []:
-        if isinstance(it, dict) and it.get("issue"):
-            out.append({k: it[k] for k in ("severity", "file", "line", "issue", "fix") if k in it})
-    return out[:40]
+        if not (isinstance(it, dict) and isinstance(it.get("issue"), str) and it["issue"].strip()):
+            continue
+        it = {k: it[k] for k in ("severity", "file", "line", "issue", "fix") if k in it}
+        for k in ("issue", "fix", "file"):
+            if k in it:
+                it[k] = str(it[k])[:500]
+        # Drop line numbers that can't exist (models sometimes emit runaway digits).
+        line = it.get("line")
+        n = lengths.get(it.get("file", ""))
+        if not isinstance(line, int) or line < 1 or (n is not None and line > n) or line > 100000:
+            it.pop("line", None)
+        out.append(it)
+    return out[:10]
