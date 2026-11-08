@@ -108,6 +108,14 @@ The service restarts on failure and starts again on reboot, because of the linge
 3. **A link from another site:** the bot answers *"Only https links from Discord or GitHub are accepted."*
 4. **mcrust as a check:** expect 2 errors (`arch`, `min_glibc`) plus the warnings from the manual review.
 
+To follow checks live on the server: `journalctl --user -u pmcheck-bot -f`. Each check logs who ran it, the download, and the result:
+```
+/checkport darkspasm.zip by someadmin
+  downloading 11.6 MB
+  downloaded 11.6 MB in 2s; running rules + AI review
+  done in 14s: 1 errors, 1 warnings, 2 notes; 3 AI notes
+```
+
 If the summary shows `AI review unavailable (HTTP 429, rate limited)`, the free-tier limit was hit. The rules report is still complete.
 
 ## 11. Optional: lock the command down further in Discord

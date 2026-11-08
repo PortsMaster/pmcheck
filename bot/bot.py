@@ -11,6 +11,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -35,6 +36,10 @@ tree = app_commands.CommandTree(client)
 lock = asyncio.Lock()
 
 
+def log(msg):
+    print(msg, flush=True)   # journald adds the timestamp
+
+
 def is_admin(member):
     return isinstance(member, discord.Member) and any(r.id in ADMIN_ROLES for r in member.roles)
 
@@ -53,12 +58,16 @@ async def download(url, dest):
             if r.url.host not in ALLOWED_HOSTS:
                 raise ValueError(f"redirected to a host that is not allowed: {r.url.host}")
             size = 0
+            total = int(r.headers.get("Content-Length") or 0)
+            if total:
+                log(f"  downloading {total / 1048576:.1f} MB")
             with open(dest, "wb") as fh:
                 async for chunk in r.content.iter_chunked(1 << 20):
                     size += len(chunk)
                     if size > MAX_BYTES:
                         raise ValueError(f"file is larger than {MAX_BYTES >> 20} MB")
                     fh.write(chunk)
+            return size
 
 
 async def run_pmcheck(zip_path, fmt):
@@ -81,13 +90,18 @@ async def run_pmcheck(zip_path, fmt):
 @app_commands.default_permissions(manage_messages=True)
 @app_commands.guild_only()
 async def checkport(inter: discord.Interaction, url: str):
+    name = Path(urlparse(url).path).name or "?"
+    log(f"/checkport {name} by {inter.user}")
     if not is_admin(inter.user):
+        log("  rejected: not an admin")
         await inter.response.send_message("This command is for PortMaster admins.", ephemeral=True)
         return
     if not url_ok(url):
+        log(f"  rejected: host {urlparse(url).hostname}")
         await inter.response.send_message("Only https links from Discord or GitHub are accepted.", ephemeral=True)
         return
     if lock.locked():
+        log("  rejected: another check is running")
         await inter.response.send_message("A check is already running, try again in a minute.", ephemeral=True)
         return
     await inter.response.defer(thinking=True)
@@ -95,10 +109,18 @@ async def checkport(inter: discord.Interaction, url: str):
         tmp = Path(tempfile.mkdtemp(prefix="pmbot-"))
         try:
             zip_path = tmp / "port.zip"
-            await download(url, zip_path)
+            t0 = time.monotonic()
+            size = await download(url, zip_path)
+            log(f"  downloaded {size / 1048576:.1f} MB in {time.monotonic() - t0:.0f}s; running rules + AI review")
+            t1 = time.monotonic()
             result = json.loads(await run_pmcheck(zip_path, "json"))
             md = await run_pmcheck_md_from(result)
+            c = result["counts"]
+            ai = result.get("ai")
+            ai_state = f"{len(ai)} AI notes" if isinstance(ai, list) else (ai or "no AI")
+            log(f"  done in {time.monotonic() - t1:.0f}s: {c['ERROR']} errors, {c['WARN']} warnings, {c['INFO']} notes; {ai_state}")
         except (ValueError, aiohttp.ClientError, json.JSONDecodeError) as e:
+            log(f"  failed: {e}")
             await inter.followup.send(f"❌ Check failed: {e}")
             return
         finally:
