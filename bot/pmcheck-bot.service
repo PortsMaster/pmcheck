@@ -1,0 +1,19 @@
+[Unit]
+Description=PortMaster /checkport Discord bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Restart=on-failure
+RestartSec=30
+ExecStartPre=-/usr/bin/podman rm -f pmcheck-bot
+ExecStart=/usr/bin/podman run --name pmcheck-bot --rm \
+    --env-file %h/.config/pmcheck-bot.env \
+    --read-only --tmpfs /tmp:rw,size=8g,mode=1777 \
+    --cap-drop=ALL --security-opt no-new-privileges \
+    --pids-limit 256 --memory 2g --cpus 2 \
+    localhost/pmcheck-bot:latest
+ExecStop=/usr/bin/podman stop -t 10 pmcheck-bot
+
+[Install]
+WantedBy=default.target

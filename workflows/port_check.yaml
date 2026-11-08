@@ -1,0 +1,64 @@
+# Copy to PortMaster-New/.github/workflows/port_check.yaml
+# Runs on a GitHub-hosted runner with a read-only token: fork code never touches the build server.
+name: Port Packaging Check
+
+on:
+  pull_request:
+    paths:
+      - 'ports/**'
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  PMCHECK_REF: v0.1.0        # pinned pmcheck tag
+  PMCHECK_WARN_ONLY: "true"  # set to "false" after the warn-only period
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Changed ports
+        id: changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dirs=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+                   --paginate --jq '.[].filename' | awk -F/ '$1=="ports" && NF>2 {print "ports/"$2}' | sort -u)
+          echo "$dirs"
+          { echo "dirs<<EOF"; echo "$dirs"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout changed ports only
+        if: steps.changed.outputs.dirs != ''
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: ${{ steps.changed.outputs.dirs }}
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        if: steps.changed.outputs.dirs != ''
+        with:
+          python-version: '3.12'
+
+      - name: Install pmcheck
+        if: steps.changed.outputs.dirs != ''
+        run: pip install "git+https://github.com/PortsMaster/pmcheck@${PMCHECK_REF}"
+
+      - name: Check ports
+        if: steps.changed.outputs.dirs != ''
+        env:
+          DIRS: ${{ steps.changed.outputs.dirs }}
+        run: |
+          rc=0
+          extra=""
+          [ "$PMCHECK_WARN_ONLY" = "true" ] && extra="--warn-only"
+          while read -r d; do
+            [ -d "$d" ] || { echo "$d removed, skipping"; continue; }
+            pmcheck "$d" --format github --prefix "$d/" --summary "$GITHUB_STEP_SUMMARY" $extra || rc=1
+          done <<< "$DIRS"
+          exit $rc
