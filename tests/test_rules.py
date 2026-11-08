@@ -148,6 +148,66 @@ class Layouts(unittest.TestCase):
             self.assertIn("structure.top-level", rules_of(t))
 
 
+class Planted(unittest.TestCase):
+    """Errors Ganimoth planted in a darkspasm copy, rebuilt on the test port."""
+    def test_script_in_gamedir(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            (Path(t) / "Test Game.sh").rename(Path(t) / "testgame" / "Test Game.sh")
+            got = rules_of(t)
+            self.assertIn("structure.script-in-gamedir", got)
+            self.assertNotIn("structure.no-gamedir", got)
+
+    def test_image_without_extension(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, gameinfo=GAMEINFO.replace("screenshot.png", "screenshot"))
+            self.assertIn("gameinfo.image", rules_of(t, "ERROR"))
+
+    def test_empty_arch_entry(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, attr={"arch": [""]})
+            port = load(t)
+            try:
+                fs = [f for f in run_all(port) if f.rule == "port.json.arch"]
+            finally:
+                port.cleanup()
+            self.assertEqual(len(fs), 1)
+            self.assertIn('["aarch64"]', fs[0].fix)
+
+    def test_echo_before_exit(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace("cd \"$GAMEDIR\"\n", 'cd "$GAMEDIR"\nif [ ! -f x ]; then\n  echo "Missing game files."\n  exit 1\nfi\n'))
+            self.assertIn("sh.echo-message", rules_of(t))
+
+    def test_empty_licenses(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            (Path(t) / "testgame" / "licenses" / "LICENSE.testgame").unlink()
+            self.assertIn("licenses.empty", rules_of(t))
+
+
+class Relaxed(unittest.TestCase):
+    def test_no_testing_thread_ok(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            (Path(t) / "testgame" / "testing_thread.txt").unlink()
+            self.assertNotIn("files.testing-thread", rules_of(t))
+
+    def test_prebuilt_loader_needs_no_compile(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            gd = Path(t) / "testgame"
+            (gd / "testgame.aarch64").rename(gd / "gmloadernext.aarch64")
+            (gd / "README.md").write_text(README.split("## Compile")[0])
+            self.assertNotIn("readme.section", rules_of(t))
+
+    def test_compiled_binary_needs_compile(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            (Path(t) / "testgame" / "README.md").write_text(README.split("## Compile")[0])
+            self.assertIn("readme.section", rules_of(t))
+
+
 class BadPorts(unittest.TestCase):
     def check(self, rule, **over):
         with tempfile.TemporaryDirectory() as t:
@@ -246,6 +306,14 @@ class Ini(unittest.TestCase):
 
     def test_empty_key(self):
         self.assertEqual([f.rule for f in check_ini('[controls]\nup = \\"\n', "x.ini")], [])
+
+    def test_duplicate_button(self):
+        rules = {f.rule for f in check_ini('[controls:hotkey]\nr1 = a\nr1 = pop_state\n', "x.ini")}
+        self.assertIn("ini.duplicate", rules)
+
+    def test_same_button_other_section_ok(self):
+        rules = {f.rule for f in check_ini('[controls]\nr1 = a\n[controls:hotkey]\nr1 = b\n', "x.ini")}
+        self.assertNotIn("ini.duplicate", rules)
 
     def test_good(self):
         txt = '[config]\ndeadzone_x = 10000\ndeadzone_y = 10000\n[controls]\na = "space"\nleft_analog_up = "up"\n'

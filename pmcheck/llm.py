@@ -12,6 +12,67 @@ MAX_CHARS = 400_000          # well inside Flash's context; keeps the free-tier 
 MAX_FILE_CHARS = 60_000
 TEXT_NAMES = re.compile(r"(\.sh|\.bash|\.ini|\.gptk|\.json|\.xml|\.md|\.txt|\.cfg|\.conf|\.py)$", re.I)
 PROMPT_FILE = Path(__file__).resolve().parent / "prompt" / "rules.md"
+REFERENCE_FILE = Path(__file__).resolve().parent / "prompt" / "reference.md"
+MAX_REFERENCE_CHARS = 60_000
+
+# Engine detection -> sections of reference.md (by heading prefix) sent as background.
+# The whole reference (~325 KB) is a porting guide; only the part matching the port helps a review.
+ENGINES = (
+    ("GameMaker (gmloader)", lambda files, sh: any(re.match(r"gmloader", n) for n in files), ["### 1.7.8"]),
+    ("Westonpack", lambda files, sh: "weston_pkg" in sh or "westonwrap" in sh, ["### 1.7.4", "### 1.7.5"]),
+    ("Godot (FRT)", lambda files, sh: any(n.startswith("frt_") or n.endswith(".pck") for n in files), ["### 1.7.6"]),
+    ("LÖVE", lambda files, sh: "love" in files or ".love" in sh or "love_" in sh, ["### 1.7.7"]),
+    ("Pyxel", lambda files, sh: "pyxel" in sh, ["### 1.7.9"]),
+    ("mkxp-z", lambda files, sh: "mkxp" in sh, ["### 1.7.10"]),
+    (".NET / Mono", lambda files, sh: "dotnet" in sh or "mono" in sh, ["### 1.7.11"]),
+    ("box64 / box86", lambda files, sh: "box64" in sh or "box86" in sh, ["### 1.7.14"]),
+    ("Java", lambda files, sh: "javaruntime" in sh or "zulu" in sh or "JAVA_HOME" in sh, ["### 1.7.15"]),
+)
+ALWAYS = ["### 1.7.13"]                      # pm_message / pm_show_error
+INI_SECTIONS = ["### 1.8.1"]                 # gptokeyb2 .ini
+
+
+def _sections(text, prefixes):
+    """Return the reference sections whose heading starts with one of prefixes, each up to the next heading of the same or higher level."""
+    lines, out = text.splitlines(), []
+    for pre in prefixes:
+        level = pre.count("#")
+        for i, l in enumerate(lines):
+            if l.startswith(pre):
+                j = i + 1
+                in_code = False
+                while j < len(lines):
+                    if lines[j].startswith("```"):
+                        in_code = not in_code
+                    m = re.match(r"^(#+) ", lines[j])
+                    if not in_code and m and len(m.group(1)) <= level:
+                        break
+                    j += 1
+                out.append("\n".join(lines[i:j]))
+                break
+    return out
+
+
+def engine_reference(port):
+    """Background text for the detected engine(s), or '' when nothing matches or the reference is missing."""
+    if not REFERENCE_FILE.exists():
+        return ""
+    files = {p.name.lower() for p in port.logical_files()}
+    sh = "\n".join(port.read_text(s) for s in port.scripts)
+    names, prefixes = [], list(ALWAYS)
+    for name, detect, secs in ENGINES:
+        if detect(files, sh):
+            names.append(name)
+            prefixes += secs
+    if any(n.endswith(".ini") for n in files) and "GPTOKEYB2" in sh:
+        prefixes += INI_SECTIONS
+    text = "\n\n".join(_sections(REFERENCE_FILE.read_text(), prefixes))[:MAX_REFERENCE_CHARS]
+    if not text:
+        return ""
+    head = ("## Engine reference" + (f" (detected: {', '.join(names)})" if names else "") + "\n"
+            "Background on how such ports are usually built. The rules above win on any conflict. "
+            "It describes one project's conventions; a third-party port may legitimately differ, so only report a difference that breaks on a device.\n\n")
+    return head + text
 
 SCHEMA = {
     "type": "ARRAY",
@@ -70,6 +131,9 @@ def review(port, findings, api_key=None, model=None, timeout=180):
         return "AI review skipped: no GEMINI_API_KEY."
     model = model or os.environ.get("PMCHECK_GEMINI_MODEL", DEFAULT_MODEL)
     system = PROMPT_FILE.read_text() if PROMPT_FILE.exists() else ""
+    ref = engine_reference(port)
+    if ref:
+        system += "\n\n" + ref
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": build_input(port, findings)}]}],

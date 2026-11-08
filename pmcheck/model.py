@@ -30,6 +30,7 @@ class Port:
     junk: list = field(default_factory=list)
     symlinks: list = field(default_factory=list)
     zip_issues: list = field(default_factory=list)
+    inner_scripts: list = field(default_factory=list)   # .sh files wrongly placed inside the game folder
     pr: bool = False         # strict PR layout (GitHub check); False = testing zip, either layout is fine
     _tmp: object = None
 
@@ -135,6 +136,9 @@ def safe_extract(zip_path, dest):
     return issues
 
 
+GAMEDIR_RE = re.compile(r"^\s*GAMEDIR=.*?/ports/([^/\"'\s]+)", re.M)
+
+
 def load(path, pr=False):
     path = Path(path)
     tmp = None
@@ -152,8 +156,17 @@ def load(path, pr=False):
 
     # A zip that wraps everything in one extra folder: descend if there is no .sh at the top.
     entries = [p for p in root.iterdir() if p.name not in JUNK]
+    inner_scripts = []
     if not any(p.suffix == ".sh" for p in entries) and len([p for p in entries if p.is_dir()]) == 1:
-        root = next(p for p in entries if p.is_dir())
+        inner = next(p for p in entries if p.is_dir())
+        # The .sh sitting inside the game folder (its GAMEDIR names that folder) is a packaging
+        # mistake, not a wrapper folder: keep the zip root so the report says so.
+        for s in sorted(inner.glob("*.sh")):
+            m = GAMEDIR_RE.search(s.read_text(errors="replace"))
+            if m and m.group(1) == inner.name:
+                inner_scripts.append(s)
+        if not inner_scripts:
+            root = inner
 
     port = Port(root=root, layout="zip", pr=pr, _tmp=tmp)
     port.symlinks = list(symlinks)
@@ -175,6 +188,9 @@ def load(path, pr=False):
         elif p.is_symlink() and p.parent != root:
             port.symlinks.append(str(p.relative_to(root)))
 
+    if inner_scripts:
+        port.scripts = inner_scripts
+        port.inner_scripts = inner_scripts
     names = {p.name.lower() for p in port.top_files}
     if "port.json" in names:
         port.layout = "pr"
@@ -183,7 +199,7 @@ def load(path, pr=False):
     # The game folder: the one named in the script's GAMEDIR, else the only folder, else root name.
     gd_name = None
     for s in port.scripts:
-        m = re.search(r"^\s*GAMEDIR=.*?/ports/([^/\"'\s]+)", port.read_text(s), re.M)
+        m = GAMEDIR_RE.search(port.read_text(s))
         if m:
             gd_name = m.group(1)
             break

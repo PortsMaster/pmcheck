@@ -67,6 +67,8 @@ RUNTIME_KEY = re.compile(
 )
 RUNTIME_ARCH_SUFFIX = re.compile(r"\.(aarch64|armhf|x86_64)(\.squashfs)?$")
 
+# Prebuilt PortMaster tools/loaders: shipping one doesn't mean the porter compiled anything.
+PREBUILT_RE = re.compile(r"^(gmloader(next|-next)?|box64|box86|love|frt_[\w.]+|westonwrap|gptokeyb2?|7zzs|xdelta3|innoextract|portmsg|mkxp-z|gamepad-picker)(\.(aarch64|armhf|x86_64))?$", re.I)
 META_FILES = {"port.json", "readme.md", "gameinfo.xml", "screenshot.png", "screenshot.jpg", "cover.png", "testing_thread.txt"}
 IMAGE_MAX_BYTES = 100 * 1024
 PNG_COMPRESSOR = "https://jantrueno.github.io/PortMaster-Wiki/tools/png-compressor/"

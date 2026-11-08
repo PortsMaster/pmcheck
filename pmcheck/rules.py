@@ -108,6 +108,9 @@ def fix_glibc():
 # ---------------------------------------------------------------- structure
 @check
 def structure(port):
+    for s in port.inner_scripts:
+        yield Finding("structure.script-in-gamedir", ERROR, f"{port.rel(s)} is inside the game folder; the launch script must sit next to it, at the top level.",
+                      file=port.rel(s), fix=f"Move {s.name} up one level, out of {s.parent.name}/.")
     if not port.scripts:
         yield Finding("structure.no-script", ERROR, "No launch script (.sh) at the top level.")
     if port.gamedir is None:
@@ -177,8 +180,6 @@ def required_files(port):
     for c in port.files():
         if c.name.lower() == "cover.png" and c.parent not in port.meta_dirs():
             yield Finding("files.cover-location", WARN, f"{port.rel(c)} is in the wrong place; cover.png goes {where}.", file=port.rel(c))
-    if not port.pr and port.meta_file("testing_thread.txt") is None:
-        yield Finding("files.testing-thread", INFO, "No testing_thread.txt.")
     if port.gamedir is not None:
         lic = [d for d in port.gamedir.iterdir() if d.is_dir() and d.name.lower() in ("licenses", "license")]
         loose = [f for f in port.gamedir.iterdir() if f.is_file() and re.search(r"licen[cs]e|copying", f.name, re.I)]
@@ -259,13 +260,16 @@ def port_json(port):
         elif data.RUNTIME_ARCH_SUFFIX.search(r) and not r.startswith("mono-"):
             yield Finding("port.json.runtime", ERROR, f"runtime {r!r} has an arch suffix; use the generic key.", file=f)
     arch = attr.get("arch") or []
-    for a in arch:
-        if a not in data.ARCHES:
-            yield Finding("port.json.arch", ERROR, f"Unknown arch {a!r}.", file=f)
     found = sorted({i["arch"] for _, i in elves(port)})
+    bad = [a for a in arch if a not in data.ARCHES]
+    if bad:
+        good = [a for a in arch if a in data.ARCHES] or found
+        yield Finding("port.json.arch", ERROR, f"Invalid arch entr{'y' if len(bad) == 1 else 'ies'} {', '.join(map(repr, bad))}.", file=f,
+                      fix=f'"arch": {json.dumps(sorted(set(good) | set(found)))}')
+        arch = [a for a in arch if a in data.ARCHES]
     if runtimes and arch and not found:
         yield Finding("port.json.arch", INFO, "No native binaries; with a runtime set, arch can stay [].", file=f)
-    if found and not arch:
+    if found and not arch and not bad:
         yield Finding("port.json.arch", ERROR, f"Native binaries for {', '.join(found)} but arch is empty.", file=f,
                       fix=f'"arch": {json.dumps(found)}')
     for a in found:
@@ -327,8 +331,11 @@ def gameinfo(port):
         want = f"./{gd}/screenshot.png"
         img = get("image")
         ok = {f"./{gd}/{n}": n for n in ("screenshot.png", "screenshot.jpg", "cover.png")}
+        target = img[len(f"./{gd}/"):] if img.startswith(f"./{gd}/") else None
         if not img:
             yield Finding("gameinfo.image", ERROR, "<image> is missing.", file=f, fix=f"<image>{want}</image>")
+        elif img not in ok and not (target and "/" not in target and port.meta_file(target)):
+            yield Finding("gameinfo.image", ERROR, f"<image> {img!r} points to a file that is not in the package.", file=f, fix=f"<image>{want}</image>")
         elif img not in ok:
             yield Finding("gameinfo.image", WARN, f"<image> is {img!r}; use {want!r} (or ./{gd}/cover.png).", file=f, fix=f"<image>{want}</image>")
         elif port.meta_file(ok[img]) is None:
@@ -376,7 +383,10 @@ def readme(port):
         return
     text = port.read_text(p)
     heads = {h.strip().lower() for h in re.findall(r"^#{1,3}\s*(.+?)\s*#*$", text, re.M)}
-    for h in ("notes", "controls", "compile"):
+    need = ["notes", "controls"]
+    if any(not data.PREBUILT_RE.match(p.name) and p.parent == port.gamedir for p, _ in elves(port)):
+        need.append("compile")
+    for h in need:
         if not any(x.startswith(h) for x in heads):
             yield Finding("readme.section", WARN if h != "compile" else INFO, f"README has no '## {h.title()}' section.", file=port.rel(p))
 
@@ -568,6 +578,13 @@ def _script(port, s):
         if not re.search(rf"{verb}\b[^\n]*{re.escape(src)}", before):
             yield Finding("sh.bind-source", WARN, f"bind_{m.group(1)} source {src} must exist first ({verb} it before this line), or the bind silently no-ops.",
                           file=f, line=n)
+    for i, (n, l) in enumerate(code):
+        after = [x for _, x in code[i + 1:i + 4]]
+        near = [x for _, x in code[max(0, i - 2):i]] + after
+        if (re.match(r"\s*echo\s+[\"']", l) and ">" not in l and any(re.match(r"\s*exit\s+[1-9]", x) for x in after)
+                and not any(re.search(r"\bpm_(message|show_error)\b", x) for x in near)):
+            yield Finding("sh.echo-message", WARN, "This message goes to the log, the player never sees it before the exit.", file=f, line=n,
+                          fix='pm_show_error "..." --title "..."   (or pm_message on older templates)')
     for n, l in grep(r"\bpm_(message|show_error)\s+--"):
         yield Finding("sh.pm_message-order", ERROR, "pm_message/pm_show_error take the message first, options after.", file=f, line=n)
     for n, l in grep(r"portmsg\.\$\{?DEVICE_ARCH|\./portmsg"):

@@ -103,10 +103,10 @@ The service restarts on failure and starts again on reboot, because of the linge
 ## 10. Test in Discord
 1. **Admin:** run `/checkport url:<link to a port zip>`.
    - To get a link, right-click a zip attachment in Discord and choose **Copy Link**. A GitHub release asset link also works.
-   - After 10 to 60 seconds you should see a summary, an `AI notes` part, and an attached `pmcheck-<port>.md`.
+   - After 10 to 60 seconds the bot posts the report once: inline when it's short, otherwise a one-line headline with `pmcheck-<port>.md` attached. The AI review is the last section.
 2. **Non-admin account:** the command is hidden, or answers *"This command is for PortMaster admins."*
 3. **A link from another site:** the bot answers *"Only https links from Discord or GitHub are accepted."*
-4. **mcrust as a check:** expect 2 errors (`arch`, `min_glibc`) plus the warnings from the manual review.
+4. **darkspasm as a check:** the original zip gives 1 error (`min_glibc`), 1 warning (duplicate `r1` in the hotkey section) and 1 note.
 
 To follow checks live on the server: `journalctl --user -u pmcheck-bot -f`. Each check logs who ran it, the download, and the result:
 ```
@@ -116,7 +116,7 @@ To follow checks live on the server: `journalctl --user -u pmcheck-bot -f`. Each
   done in 14s: 1 errors, 1 warnings, 2 notes; 3 AI notes
 ```
 
-If the summary shows `AI review unavailable (HTTP 429, rate limited)`, the free-tier limit was hit. The rules report is still complete.
+If the report shows `AI review unavailable (HTTP 429, rate limited)`, the free-tier limit was hit. The rules report is still complete.
 
 ## 11. Optional: lock the command down further in Discord
 Go to **Server Settings → Integrations → PortMaster Checker → /checkport**. There you can limit the command to the admin roles and to a single channel such as `#port-check`. This works on top of the role check in the bot's code.
@@ -128,7 +128,7 @@ cd ~/git-scripts/pmcheck && git pull
 podman build -t pmcheck-bot -f bot/Containerfile .
 systemctl --user restart pmcheck-bot
 ```
-- The AI rules live in `pmcheck/prompt/rules.md`; editing it needs the same rebuild.
+- The AI rules live in `pmcheck/prompt/rules.md` (its "Valid, never report these" list stops repeat false positives). `pmcheck/prompt/reference.md` is the porting reference; only the section for the detected engine (gmloader, Westonpack, Godot, ...) is sent with each check. Editing either needs the same rebuild.
 - Before changing rules, test locally: `pip install . && pmcheck some-port.zip` (add `--ai` with `GEMINI_API_KEY` set).
 
 ## Troubleshooting

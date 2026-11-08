@@ -30,6 +30,7 @@ def check_ini(text, f, scripts=""):
             continue
         if s.startswith("["):
             sect = s.lower()
+            seen = {}
             continue
         if "=" not in s or sect is None:
             continue
@@ -43,6 +44,9 @@ def check_ini(text, f, scripts=""):
             continue
         if not v:
             continue
+        if k in seen:
+            yield Finding("ini.duplicate", WARN, f"{k} is set twice in {sect} (lines {seen[k]} and {n}); only the last one counts.", file=f, line=n)
+        seen[k] = n
         if k not in BUTTONS:
             yield Finding("ini.button", WARN, f"Unknown button {k!r}.", file=f, line=n)
             continue
@@ -73,5 +77,5 @@ def check_ini(text, f, scripts=""):
         if "DISPLAY_WIDTH" not in scripts or "deadzone_scale" not in scripts:
             yield Finding("ini.mouse-hires", INFO, "No high-res mouse-speed bump in the launch script (sed deadzone_scale when DISPLAY_WIDTH > 1280).", file=f)
     if stick_keys and not ({"deadzone_x", "deadzone_y"} <= set(config)):
-        yield Finding("ini.deadzone", WARN, "A stick sends keys but [config] has no deadzone_x/deadzone_y; a resting stick holds arrow keys.", file=f,
+        yield Finding("ini.deadzone", INFO, "A stick sends keys but [config] has no deadzone_x/deadzone_y; a resting stick holds arrow keys.", file=f,
                       snippet="[config]\ndeadzone_x = 10000\ndeadzone_y = 10000")

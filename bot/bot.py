@@ -125,20 +125,14 @@ async def checkport(inter: discord.Interaction, url: str):
             return
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+    # One output only: the full report inline when it fits, otherwise a headline plus the report as a file.
+    if len(md) <= 1900:
+        await inter.followup.send(md)
+        return
     c = result["counts"]
-    lines = [f"**{result['port']}**: {c['ERROR']} errors, {c['WARN']} warnings, {c['INFO']} notes"]
-    for f in [x for x in result["findings"] if x["severity"] == "ERROR"][:8]:
-        lines.append(f"❌ `{f['rule']}` {f['message'][:160]}")
-    ai = result.get("ai")
-    if isinstance(ai, list) and ai:
-        lines.append("🤖 AI notes:")
-        for a in ai[:4]:
-            lines.append(f"• {a.get('issue', '')[:160]}")
-    elif isinstance(ai, str):
-        lines.append(f"🤖 {ai}")
-    msg = "\n".join(lines)[:1900]
+    head = f"**{result['port']}**: {c['ERROR']} errors, {c['WARN']} warnings, {c['INFO']} notes. Full report attached."
     file = discord.File(io.BytesIO(md.encode()), filename=f"pmcheck-{result['port']}.md")
-    await inter.followup.send(msg, file=file)
+    await inter.followup.send(head, file=file)
 
 
 async def run_pmcheck_md_from(result):

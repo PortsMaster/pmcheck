@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pmcheck"
-version = "0.1.1"
+version = "0.1.2"
 description = "Static packaging checker for PortMaster ports"
 license = {text = "MIT"}
 requires-python = ">=3.9"
@@ -20,4 +20,4 @@ pmcheck = "pmcheck.__main__:main"
 packages = ["pmcheck"]
 
 [tool.setuptools.package-data]
-pmcheck = ["g2keys.json", "prompt/rules.md"]
+pmcheck = ["g2keys.json", "prompt/rules.md", "prompt/reference.md"]
