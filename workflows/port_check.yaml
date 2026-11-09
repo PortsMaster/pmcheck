@@ -14,7 +14,7 @@ permissions:
   pull-requests: read
 
 env:
-  PMCHECK_REF: v0.2.2        # pinned pmcheck tag
+  PMCHECK_REF: v0.2.3        # pinned pmcheck tag
   PMCHECK_WARN_ONLY: "true"  # set to "false" after the warn-only period
 
 jobs:
