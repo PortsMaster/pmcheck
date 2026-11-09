@@ -21,6 +21,9 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - Licence and copyright years up to the current year (the input states today's date).
 - `echo` lines that only log progress or write state to a file; only an echo that is the last thing before an error `exit` is a problem, and the rule checker already reports those.
 - Duplicate `libfoo.so` + `libfoo.so.N` copies in Mono/.NET ports (P/Invoke opens the unversioned name).
+- gameinfo.xml `<image>./<gamedir>/cover.png</image>` or `./<gamedir>/screenshot.png` while the PR keeps the file next to the .sh: PortMaster installs it into the game folder, so the subfolder path is correct.
+- port.json `runtime` entries with or without `.squashfs` (harbourmaster adds the suffix itself; merged ports use both).
+- gptokeyb2 without `-c` (kill switch only, or the game reads the pad itself), and `$GPTOKEYB2 ... -x` (gptokeyb2's virtual Xbox 360 pad mode). Neither fails to start.
 - `pm_message "text"` without options (older template style). The log redirect `> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1` (the old `exec > "$GAMEDIR/log.txt" 2>&1` is flagged by the rule checker).
 
 ## Hard rules
@@ -35,7 +38,7 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - Don't kill gptokeyb by hand (`kill -9 $(pidof gptokeyb)`, `pkill gptokeyb`): `pm_finish` and `patcher.txt` already do it (`pm_gptokeyb_finish`). The rule checker reports it.
 - Player messages: `pm_message` / `pm_show_error`, never plain `echo` (that only reaches the log). Never call portmsg directly. `pm_finish` at the end. Use `$ESUDO`, never `sudo`.
 - Controls: every port launches gptokeyb (classic `$GPTOKEYB` with `.gptk`, or `$GPTOKEYB2` with `.ini`; both are valid, never ask to switch) for the Select+Start hotkey exit. Its kill target must be the process that actually runs (e.g. `java`, `love`, the interpreter), or the hotkey does nothing. Don't bind quit next to a primary action button.
-- Runtimes: use PortMaster's runtime squashfs files (Westonpack, JDK, Mono, Godot/FRT ...) instead of bundling a runtime. `port.json` `runtime` uses catalog keys (e.g. `weston_pkg_0.2`), never display labels, no arch suffix.
+- Runtimes: use PortMaster's runtime squashfs files (Westonpack, JDK, Mono, Godot/FRT ...) instead of bundling a runtime. `port.json` `runtime` uses catalog keys (e.g. `weston_pkg_0.2`, `.squashfs` optional), never display labels, no arch suffix.
 - port.json v4: `name` = `<gamedir>.zip`; `items` = script + game folder; one `porter` entry per person; `desc`/`inst` plain text; `inst` = setup instructions only (not controls); `store` entries are objects `{name, gameurl, developerurl}`; `min_glibc` = highest GLIBC_2.x of any shipped native binary.
 - gameinfo.xml: `<path>./Script Name.sh</path>`, `<image>./<gamedir>/screenshot.png</image>` (or cover.png if shipped), `<releasedate>YYYYMMDDT000000</releasedate>`.
 

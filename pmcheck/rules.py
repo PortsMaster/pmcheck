@@ -281,7 +281,10 @@ def port_json(port):
                       fix=f'"arch": {json.dumps(found)}')
     for a in found:
         if arch and a not in arch:
-            yield Finding("port.json.arch", WARN, f"Ships {a} binaries but arch does not list {a}.", file=f)
+            if a == "armhf" and "aarch64" in arch:
+                yield Finding("port.json.arch", INFO, "Ships armhf binaries (they run on aarch64 devices with a 32-bit userland); add armhf to arch only if the port also runs on armhf devices.", file=f)
+            else:
+                yield Finding("port.json.arch", WARN, f"Ships {a} binaries but arch does not list {a}.", file=f)
     # min_glibc
     need = [(i["glibc"], p) for p, i in elves(port) if i["glibc"]]
     if need:
@@ -342,10 +345,15 @@ def gameinfo(port):
         if not img:
             yield Finding("gameinfo.image", ERROR, "<image> is missing.", file=f, fix=f"<image>{want}</image>")
         elif img not in ok and not (target and "/" not in target and port.meta_file(target)):
-            yield Finding("gameinfo.image", ERROR, f"<image> {img!r} points to a file that is not in the package.", file=f, fix=f"<image>{want}</image>")
+            have = next((f"./{gd}/{n}" for n in ("screenshot.png", "screenshot.jpg", "cover.png") if port.meta_file(n)), want)
+            if img.lower() in {k.lower() for k in ok} or img.lower() == have.lower():
+                yield Finding("gameinfo.image", ERROR, f"<image> {img!r} has the wrong case; the folder is {gd!r} and device filesystems are case-sensitive.", file=f,
+                              fix=f"<image>{have if have.lower() == img.lower() else img.replace(img.split('/')[1], gd, 1)}</image>")
+            else:
+                yield Finding("gameinfo.image", ERROR, f"<image> {img!r} points to a file that is not in the package.", file=f, fix=f"<image>{have}</image>")
         elif img not in ok:
             yield Finding("gameinfo.image", WARN, f"<image> is {img!r}; use {want!r} (or ./{gd}/cover.png).", file=f, fix=f"<image>{want}</image>")
-        elif port.meta_file(ok[img]) is None:
+        elif port.meta_file(ok[img]) is None and ok[img] != "screenshot.png":   # a missing screenshot.png is files.missing already
             yield Finding("gameinfo.image", ERROR, f"<image> points to {ok[img]}, but the package has no {ok[img]} {port.where()}.", file=f,
                           fix=f"Add {ok[img]}, or use <image>{want}</image>.")
 
@@ -412,6 +420,7 @@ def binaries(port):
             bundled[p.name] = p
             if info["soname"]:
                 bundled.setdefault(info["soname"], p)
+    x11_done = False
     for name, p in sorted(bundled.items()):
         if p.name != name:
             continue
@@ -424,6 +433,10 @@ def binaries(port):
         if name.startswith("libSDL3.so") and b"SDL3SHIM_" not in p.read_bytes():
             yield Finding("libs.sdl3", ERROR, f"{rel} is upstream SDL3. SDL3 games ship the sdl3-sdl2-backend shim, which hands video, audio and input to the CFW's SDL2 (fbdev, rotation, KMSDRM quirks).", file=rel,
                           fix="Build against https://github.com/bmdhacks/SDL/tree/sdl2-backend and ship its libSDL3.so.0 instead.")
+        if re.match(r"^lib(X11|xcb)\.so", name) and not re.search(r"westonwrap|weston_pkg", scripts_all) and not x11_done:
+            x11_done = True
+            yield Finding("libs.x11", WARN, f"Bundles X11 libraries ({rel.rsplit('/', 1)[0]}/libX*, libxcb*) without Westonpack. On KMS/DRM devices nothing draws through X11, the binary only links it.", file=rel,
+                          fix="Rebuild without X11 and drop the libX*/libxcb* files (OHRRPGCE: scons gfx=sdl2 no_x11=1).")
         for rx in data.COMMON_LIBS:
             if rx.match(name):
                 yield Finding("libs.common", WARN, f"{rel} is near-universal on CFW images; bundling only bloats the port.", file=rel,
@@ -435,7 +448,8 @@ def binaries(port):
                     continue   # .NET P/Invoke opens the unversioned name, native libs NEED the SONAME: both copies are used
                 yield Finding("libs.duplicate", WARN, f"{rel} duplicates {so} in the same folder; ship only {so}.", file=rel, fix="Delete it.")
             else:
-                yield Finding("libs.soname", WARN, f"{rel} should be named after its SONAME {so!r}.", file=rel)
+                if not any(q != p and p.name.encode() in q.read_bytes() for q, _ in elves(port)):   # dlopen()ed by this name
+                    yield Finding("libs.soname", WARN, f"{rel} should be named after its SONAME {so!r}.", file=rel)
     for p, info in elves(port):
         rel = port.rel(p)
         for n in info["needed"]:
@@ -588,6 +602,10 @@ def _script(port, s):
         yield Finding("sh.pm_finish", WARN, "pm_finish is not called at the end.", file=f)
     for n, l in grep(r"\bSDL_(VIDEO|AUDIO)DRIVER="):
         sev = WARN if "sdl2" in l.lower() and "SDL3SHIM" in body else ERROR
+        if sev == ERROR and re.search(r"DRIVER=\"?\$\{SDL_(VIDEO|AUDIO)DRIVER:-", l):
+            yield Finding("sh.sdl-driver", WARN, "Sets an SDL driver default; when the CFW leaves it unset SDL would pick the backend itself.", file=f, line=n,
+                          fix="Drop it unless a device needs it, and say which in a short comment.")
+            continue
         yield Finding("sh.sdl-driver", sev, "Never force SDL_VIDEODRIVER/SDL_AUDIODRIVER; the CFW selects the backend.", file=f, line=n)
     for n, l in grep(r"^\s*export\s+LD_PRELOAD="):
         yield Finding("sh.ld_preload", ERROR, "export LD_PRELOAD leaks into gptokeyb; set it as a prefix on the game command only.", file=f, line=n)
@@ -612,6 +630,8 @@ def _script(port, s):
             continue
         if re.search(r"XDG_(DATA|CACHE)_HOME=\"?(\$HOME|\$\{HOME\}|~)/\.(local/share|cache)\"?\s*$", l):
             continue   # just the default location
+        if not re.match(r"\s*(export\s+)?XDG_(DATA|CACHE)_HOME=\S*\s*$", l):
+            continue   # a prefix on one command (Godot/westonwrap template), not the whole script
         yield Finding("sh.xdg", INFO, "Redirecting a whole XDG root; prefer bind_directories for the game's own folder.", file=f, line=n)
     for n, l in grep(r"^\s*bind_(directories|files)\s"):
         try:
@@ -622,12 +642,20 @@ def _script(port, s):
             continue
         m = re.match(r"\s*bind_(directories|files)", l)
         src = args[2]
+        vars_ = dict(re.findall(r"^\s*(?:export\s+)?(\w+)=\"?([^\"\s]+)\"?\s*$", "\n".join(x for k, x in code if k < n), re.M))
+        for _ in range(3):
+            src = re.sub(r"\$\{?(\w+)\}?", lambda v: vars_.get(v.group(1), v.group(0)) if v.group(1) not in ("GAMEDIR", "HOME", "directory") else v.group(0), src)
+        src = src.rstrip("/")
         before = "\n".join(x for k, x in code if k < n)
         verb = "mkdir" if m.group(1) == "directories" else "touch"
         shipped = _resolve(port, src)
         if shipped is not None and shipped.exists():
             continue
-        if not re.search(rf"{verb}\b[^\n]*{re.escape(src)}\"?(\s|$)", before, re.M):
+        before_r = before
+        for k, v in vars_.items():
+            if k not in ("GAMEDIR", "HOME", "directory"):
+                before_r = re.sub(r"\$\{?" + k + r"\}?(?!\w)", v.replace("\\", "\\\\"), before_r)
+        if not re.search(rf"{verb}\b[^\n]*{re.escape(src)}/?\"?(\s|$)", before_r, re.M):
             yield Finding("sh.bind-source", WARN, f"bind_{m.group(1)} source {src} must exist first ({verb} it before this line), or the bind silently no-ops.",
                           file=f, line=n)
     for i, (n, l) in enumerate(code):
@@ -645,6 +673,12 @@ def _script(port, s):
                 and not any(re.search(r"\bpm_(message|show_error)\b", x) for x in near)):
             yield Finding("sh.echo-message", WARN, "This message goes to the log, the player never sees it before the exit.", file=f, line=n,
                           fix='pm_show_error "..." --title "..."   (or pm_message on older templates)')
+    for n, l in grep(r"^\s*(echo|printf)\b.*>\s*\"?(\$\{?CUR_TTY\}?|/dev/tty\d*)\"?"):
+        if re.search(r"\\033c|\\e\[|\\033\[", l):
+            continue   # clearing the console
+        yield Finding("sh.tty-message", WARN, "Message written to the console TTY (old style); many CFWs show EmulationStation or nothing there.", file=f, line=n,
+                      fix='pm_show_error "..." --title "..."')
+        break
     for n, l in grep(r"\bpm_(message|show_error)\s+--"):
         yield Finding("sh.pm_message-order", ERROR, "pm_message/pm_show_error take the message first, options after.", file=f, line=n)
     for n, l in grep(r"portmsg\.\$\{?DEVICE_ARCH|\./portmsg"):

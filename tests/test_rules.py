@@ -297,6 +297,33 @@ class ScriptNoise(unittest.TestCase):
     def test_kill_gptokeyb_obsolete(self):
         self.assertIn("sh.kill-gptokeyb", self.sh_rules('$ESUDO kill -9 $(pidof gptokeyb) 2>/dev/null\n'))
 
+    def test_bind_source_via_variable(self):
+        r = self.sh_rules('CONF="$GAMEDIR/conf/"\nmkdir -p "$GAMEDIR/conf"\nbind_directories "$HOME/.thing" "$CONF"\n')
+        self.assertNotIn("sh.bind-source", r)
+
+    def test_tty_message(self):
+        r = self.sh_rules('if [ ! -f x ]; then\n  printf "\\033c" > $CUR_TTY\n  echo "Missing x" > $CUR_TTY\n  exit 1\nfi\n')
+        self.assertIn("sh.tty-message", r)
+
+    def test_sdl_driver_default_is_warn(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace('cd "$GAMEDIR"\n', 'cd "$GAMEDIR"\nexport SDL_AUDIODRIVER=${SDL_AUDIODRIVER:-alsa}\n'))
+            self.assertIn("sh.sdl-driver", rules_of(t, "WARN"))
+            self.assertNotIn("sh.sdl-driver", rules_of(t, "ERROR"))
+
+    def test_xdg_prefix_on_command_ok(self):
+        self.assertNotIn("sh.xdg", self.sh_rules('XDG_DATA_HOME="$GAMEDIR/conf" ./testgame.aarch64 --version\n'))
+
+    def test_gameinfo_image_case(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, gameinfo=GAMEINFO.replace("./testgame/screenshot.png", "./TestGame/screenshot.png"))
+            port = load(t)
+            try:
+                f = [x for x in run_all(port) if x.rule == "gameinfo.image"]
+            finally:
+                port.cleanup()
+            self.assertTrue(f and "wrong case" in f[0].message and "./testgame/screenshot.png" in f[0].fix, f)
+
     def test_xdg_default_ok(self):
         self.assertNotIn("sh.xdg", self.sh_rules('export XDG_DATA_HOME="$HOME/.local/share"\n'))
 
