@@ -1,5 +1,6 @@
 import json
 
+from . import __version__
 from .findings import ERROR, WARN, INFO, ORDER
 
 
@@ -17,7 +18,7 @@ def summary_line(findings):
 
 def markdown(name, findings, ai=None):
     fs = sorted(findings, key=lambda f: (ORDER[f.severity], f.file, f.line))
-    out = [f"# pmcheck: {name}", "", f"**{summary_line(findings)}**", ""]
+    out = [f"# pmcheck {__version__}: {name}", "", f"**{summary_line(findings)}**", ""]
     icon = {ERROR: "❌", WARN: "⚠️", INFO: "ℹ️"}
     for sev in (ERROR, WARN, INFO):
         group = [f for f in fs if f.severity == sev]

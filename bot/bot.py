@@ -20,7 +20,7 @@ import aiohttp
 import discord
 from discord import app_commands
 
-from pmcheck import ghpr
+from pmcheck import __version__, ghpr
 
 ALLOWED_HOSTS = {
     "cdn.discordapp.com", "media.discordapp.net",
@@ -151,7 +151,7 @@ async def checkport(inter: discord.Interaction, url: str):
         await inter.followup.send(md)
         return
     counts = "; ".join(f"**{r['port']}**: {r['counts']['ERROR']} errors, {r['counts']['WARN']} warnings, {r['counts']['INFO']} notes" for r in results)
-    head = (f"**{title}**\n" if title else "") + counts + ". Full report attached."
+    head = (f"**{title}**\n" if title else "") + counts + f". Full report attached (pmcheck {__version__})."
     fname = f"pmcheck-pr{prn}.md" if prn else f"pmcheck-{results[0]['port']}.md"
     await inter.followup.send(head, file=discord.File(io.BytesIO(md.encode()), filename=fname))
 
