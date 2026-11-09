@@ -70,12 +70,13 @@ def check_ini(text, f, scripts=""):
             else:
                 stick_keys = True
     if mouse:
-        missing = sorted(MOUSE_CONFIG - set(config))
+        have = set(config) | ({"deadzone_x", "deadzone_y"} if "deadzone" in config else set())
+        missing = sorted(MOUSE_CONFIG - have)
         if missing:
             yield Finding("ini.mouse-config", WARN, "Stick mouse without the standard [config] block (missing " + ", ".join(missing) + "); the cursor drifts.",
                           file=f, snippet="[config]\nmouse_delay = 16\ndeadzone_mode = scaled_radial\ndeadzone_scale = 6\ndeadzone_x = 2000\ndeadzone_y = 2000")
         if "DISPLAY_WIDTH" not in scripts or "deadzone_scale" not in scripts:
             yield Finding("ini.mouse-hires", INFO, "No high-res mouse-speed bump in the launch script (sed deadzone_scale when DISPLAY_WIDTH > 1280).", file=f)
-    if stick_keys and not ({"deadzone_x", "deadzone_y"} <= set(config)):
+    if stick_keys and not ({"deadzone_x", "deadzone_y"} <= set(config) or "deadzone" in config):
         yield Finding("ini.deadzone", INFO, "A stick sends keys but [config] has no deadzone_x/deadzone_y; a resting stick holds arrow keys.", file=f,
                       snippet="[config]\ndeadzone_x = 10000\ndeadzone_y = 10000")

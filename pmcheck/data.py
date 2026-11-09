@@ -40,9 +40,9 @@ GL_LIBS = re.compile(r"^lib(GL|EGL)\.so")
 # Near-universal on CFW base images: bundling only bloats the port.
 COMMON_LIBS = [
     re.compile(p) for p in (
-        r"^libSDL2_image-2\.0\.so", r"^libSDL2_mixer-2\.0\.so", r"^libSDL2_ttf-2\.0\.so",
+        # the packaging rules' list; libstdc++/libgcc_s can legitimately be newer than the CFW's (GLIBCXX)
+        r"^libSDL2_image-2\.0\.so", r"^libSDL2_mixer-2\.0\.so",
         r"^libpng16\.so", r"^libz\.so", r"^libfreetype\.so", r"^libexpat\.so", r"^libbz2\.so",
-        r"^libstdc\+\+\.so", r"^libgcc_s\.so", r"^libogg\.so", r"^libvorbis(file)?\.so",
     )
 ]
 

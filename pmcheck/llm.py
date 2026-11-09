@@ -83,6 +83,8 @@ SCHEMA = {
     "items": {
         "type": "OBJECT",
         "properties": {
+            "kind": {"type": "STRING", "enum": ["issue", "dispute"]},
+            "finding": {"type": "STRING"},
             "severity": {"type": "STRING", "enum": ["error", "warning", "note"]},
             "file": {"type": "STRING"},
             "line": {"type": "INTEGER"},
@@ -105,8 +107,8 @@ def build_input(port, findings):
     if len(tree) > 400:
         tree = tree[:400] + [f"... {len(files) - 400} more files"]
     parts.append("\n".join(tree))
-    parts.append("## Findings already reported by the rule checker (do not repeat these)")
-    parts.append("\n".join(f"- [{f.severity}] {f.rule} {f.file}:{f.line} {f.message}" for f in findings) or "(none)")
+    parts.append("## Findings already reported by the rule checker (do not repeat these; dispute one by its F number if the files prove it wrong)")
+    parts.append("\n".join(f"- F{i} [{f.severity}] {f.rule} {f.file}:{f.line} {f.message}" for i, f in enumerate(findings, 1)) or "(none)")
     lic_dirs = [p for p in files if re.search(r"(^|/)licen[cs]es?/", port.rel(p))]
     budget = MAX_CHARS
     priority = sorted(
@@ -200,9 +202,16 @@ def review(port, findings, api_key=None, model=None, timeout=150):
     except (KeyError, IndexError, ValueError):
         return "AI review returned no usable answer."
     lengths = {port.rel(p): len(port.read_text(p).splitlines()) for p in port.logical_files() if TEXT_NAMES.search(p.name)}
-    out = []
+    out, disputes = [], []
     for it in items if isinstance(items, list) else []:
         if not (isinstance(it, dict) and isinstance(it.get("issue"), str) and it["issue"].strip()):
+            continue
+        if it.get("kind") == "dispute":
+            m = re.fullmatch(r"F?(\d+)", str(it.get("finding", "")).strip())
+            if m and 1 <= int(m.group(1)) <= len(findings):
+                f = findings[int(m.group(1)) - 1]
+                disputes.append({"kind": "dispute", "rule": f.rule, "file": f.file, "line": f.line,
+                                 "finding": f.message[:200], "issue": str(it["issue"])[:500]})
             continue
         it = {k: it[k] for k in ("severity", "file", "line", "issue", "fix") if k in it}
         for k in ("issue", "fix", "file"):
@@ -214,4 +223,4 @@ def review(port, findings, api_key=None, model=None, timeout=150):
         if not isinstance(line, int) or line < 1 or (n is not None and line > n) or line > 100000:
             it.pop("line", None)
         out.append(it)
-    return out[:10]
+    return out[:10] + disputes[:10]

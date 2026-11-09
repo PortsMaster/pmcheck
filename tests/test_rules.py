@@ -138,9 +138,17 @@ class Layouts(unittest.TestCase):
 
     def test_pr_mode_accepts_pr_layout(self):
         with tempfile.TemporaryDirectory() as t:
-            make_port(t)
-            to_pr_layout(t)
-            self.assertEqual(rules_of(t, "ERROR", pr=True), set())
+            root = Path(t) / "testgame"          # ports/<name>/ in PortMaster-New
+            make_port(root)
+            to_pr_layout(root)
+            self.assertEqual(rules_of(root, "ERROR", pr=True), set())
+
+    def test_pr_name_must_match_folder(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t) / "othername"
+            make_port(root)
+            to_pr_layout(root)
+            self.assertIn("port.json.name", rules_of(root, "ERROR", pr=True))
 
     def test_zip_stray_top_file(self):
         with tempfile.TemporaryDirectory() as t:
@@ -295,7 +303,7 @@ class ScriptNoise(unittest.TestCase):
         self.assertNotIn("sh.bind-source", r)
 
     def test_kill_gptokeyb_obsolete(self):
-        self.assertIn("sh.kill-gptokeyb", self.sh_rules('$ESUDO kill -9 $(pidof gptokeyb) 2>/dev/null\n'))
+        self.assertIn("sh.kill-gptokeyb", self.sh_rules('source "$controlfolder/utils/patcher.txt"\n$ESUDO kill -9 $(pidof gptokeyb) 2>/dev/null\n'))
 
     def test_bind_source_via_variable(self):
         r = self.sh_rules('CONF="$GAMEDIR/conf/"\nmkdir -p "$GAMEDIR/conf"\nbind_directories "$HOME/.thing" "$CONF"\n')

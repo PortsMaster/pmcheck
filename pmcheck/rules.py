@@ -135,9 +135,11 @@ def structure(port):
             yield Finding("structure.top-level", WARN, "More than one top-level folder: " + ", ".join(d.name for d in port.top_dirs))
     for j in sorted(set(port.junk)):
         yield Finding("structure.junk", WARN, f"Junk file/folder {j!r} in the package.", fix="Remove it (macOS/Windows leftovers).")
-    for s in port.symlinks:
-        yield Finding("structure.symlink", ERROR, f"Symlink {s!r}: symlinks break on FAT/exFAT and across zip/copy.",
-                      fix="Ship one real file named after the exact SONAME.")
+    if port.symlinks:
+        links = sorted(port.symlinks)
+        shown = ", ".join(repr(x) for x in links[:5]) + (f" and {len(links) - 5} more" if len(links) > 5 else "")
+        yield Finding("structure.symlink", ERROR, f"{len(links)} symlink{'s' if len(links) > 1 else ''} ({shown}): symlinks break on FAT/exFAT and across zip/copy.",
+                      fix="Replace each with the real file (for libraries: one file named after the exact SONAME).")
     for p in port.files():
         size = p.stat().st_size
         if size > data.GIT_FILE_LIMIT:
@@ -165,7 +167,7 @@ def _biggest_subdirs(port, n=3):
             rel = p.relative_to(port.gamedir)
         except ValueError:
             continue
-        if len(rel.parts) > 1 and not rel.parts[0].startswith(("libs.", "gl4es", "licenses", "license")) and rel.parts[0] not in ("libs", "lib"):
+        if len(rel.parts) > 1 and not rel.parts[0].startswith(("libs.", "gl4es", "licen")) and rel.parts[0] not in ("libs", "lib"):
             counts[rel.parts[0]] = counts.get(rel.parts[0], 0) + 1
     return [k for k, v in sorted(counts.items(), key=lambda kv: -kv[1]) if v > 10][:n]
 
@@ -183,12 +185,14 @@ def required_files(port):
                 md = [f for d in port.meta_dirs() for f in sorted(d.glob("*")) if f.is_file() and f.suffix.lower() == ".md"]
                 if md:
                     fix = f"Rename {port.rel(md[0])} to {port.rel(md[0].parent / 'README.md')}."
+            if name == "screenshot.png" and not port.pr:
+                sev = WARN   # testing zips often get the screenshot last; the PR needs it
             yield Finding("files.missing", sev, f"Missing {name} ({where}).", fix=fix)
     for c in port.files():
         if c.name.lower() == "cover.png" and c.parent not in port.meta_dirs():
             yield Finding("files.cover-location", WARN, f"{port.rel(c)} is in the wrong place; cover.png goes {where}.", file=port.rel(c))
     if port.gamedir is not None:
-        lic = [d for d in port.gamedir.iterdir() if d.is_dir() and d.name.lower() in ("licenses", "license")]
+        lic = [d for d in port.gamedir.iterdir() if d.is_dir() and d.name.lower() in ("licenses", "license", "licences", "licence")]
         loose = [f for f in port.gamedir.iterdir() if f.is_file() and re.search(r"licen[cs]e|copying", f.name, re.I)]
         if not lic and loose:
             yield Finding("licenses.folder", WARN, "Licence files sit loose in the game folder (" + ", ".join(f.name for f in loose) + "); move them into licenses/.")
@@ -216,8 +220,17 @@ def port_json(port):
         yield Finding("port.json.version", WARN, f"port.json version is {pj.get('version')!r}; current schema is 4.", file=f)
     attr = pj.get("attr") or {}
     gd = port.gamedir.name if port.gamedir else None
-    if gd and pj.get("name") != f"{gd}.zip":
-        yield Finding("port.json.name", ERROR, f"name is {pj.get('name')!r}, must be {gd + '.zip'!r}.", file=f)
+    name = str(pj.get("name") or "")
+    if port.pr:
+        # build_release.py: new ports need name == name_cleaner(<PR folder>) + ".zip" and a game folder of that name;
+        # ports added before 2024-01-26 are exempt, so a different game folder is only reported when the name is off too.
+        want = name_cleaner(port.root.name) + ".zip"
+        if name_cleaner(name) != want:
+            yield Finding("port.json.name", ERROR, f"name is {name!r}, must be {want!r} (the PR folder's name).", file=f)
+    elif not name.endswith(".zip"):
+        yield Finding("port.json.name", ERROR, f"name is {name!r}; it must end in .zip ({(gd or name) + '.zip'!r}).", file=f)
+    elif gd and name != f"{gd}.zip":
+        yield Finding("port.json.name", WARN, f"name is {name!r}; a new port's name is <game folder>.zip, {gd + '.zip'!r} (older ports keep theirs).", file=f)
     items = [str(i).rstrip("/") for i in (pj.get("items") or [])]
     actual = [s.name for s in port.scripts] + ([gd] if gd else [])
     for i in items:
@@ -276,7 +289,7 @@ def port_json(port):
         arch = [a for a in arch if a in data.ARCHES]
     if runtimes and arch and not found:
         yield Finding("port.json.arch", INFO, "No native binaries; with a runtime set, arch can stay [].", file=f)
-    if found and not arch and not bad:
+    if found and not arch and not bad and not runtimes:   # harbourmaster ignores arch when a runtime is set
         yield Finding("port.json.arch", ERROR, f"Native binaries for {', '.join(found)} but arch is empty.", file=f,
                       fix=f'"arch": {json.dumps(found)}')
     for a in found:
@@ -320,17 +333,18 @@ def gameinfo(port):
     except ET.ParseError as e:
         yield Finding("gameinfo.parse", ERROR, f"gameinfo.xml is not well-formed: {e}", file=f)
         return
-    game = root.find("game") if root.tag == "gameList" else None
+    # harbourmaster merges root.findall("game"): any root name works, a bare <game> root is never merged
+    game = root.find("game")
     if game is None:
-        yield Finding("gameinfo.structure", ERROR, "Expected <gameList><game>...</game></gameList>.", file=f)
+        yield Finding("gameinfo.structure", ERROR, "No <game> inside the root element, so PortMaster adds nothing to the game list. Expected <gameList><game>...</game></gameList>.", file=f)
         return
     for child in game:
         if child.tag not in data.GAMEINFO_TAGS:
             yield Finding("gameinfo.tag", WARN, f"Undocumented tag <{child.tag}>.", file=f)
     get = lambda t: (game.findtext(t) or "").strip()
-    for t in ("name", "desc", "developer", "releasedate", "genre"):
-        if not get(t):
-            yield Finding("gameinfo.field", WARN, f"<{t}> is missing or empty.", file=f)
+    empty = [t for t in ("name", "desc", "developer", "releasedate", "genre") if not get(t)]
+    if empty:
+        yield Finding("gameinfo.field", WARN, "Missing or empty: " + ", ".join(f"<{t}>" for t in empty) + ".", file=f)
     scripts = {f"./{s.name}" for s in port.scripts}
     if get("path") and scripts and get("path") not in scripts:
         yield Finding("gameinfo.path", ERROR, f"<path> {get('path')!r} does not match the script ({', '.join(sorted(scripts))}).", file=f)
@@ -340,7 +354,7 @@ def gameinfo(port):
         gd = port.gamedir.name
         want = f"./{gd}/screenshot.png"
         img = get("image")
-        ok = {f"./{gd}/{n}": n for n in ("screenshot.png", "screenshot.jpg", "cover.png")}
+        ok = {f"./{gd}/{n}": n for n in ("screenshot.png", "screenshot.jpg", "cover.png", "cover.jpg")}
         target = img[len(f"./{gd}/"):] if img.startswith(f"./{gd}/") else None
         if not img:
             yield Finding("gameinfo.image", ERROR, "<image> is missing.", file=f, fix=f"<image>{want}</image>")
@@ -411,6 +425,24 @@ def _in_gl4es(p):
     return any(part.startswith("gl4es") for part in p.parts)
 
 
+SO_TOKEN = re.compile(rb"[\w.+\-]*\.so(?:\.[\w.]*)?(?![\w.\-])")
+
+
+def _named_elsewhere(port, p):
+    """Another file in the package names this library (dlopen() by name, a .NET dllmap, a Lisp/CFFI core ...).
+    Every file is read once per port; the exact library names found are kept per file."""
+    if not hasattr(port, "_so_names"):
+        port._so_names = {}
+        for q in port.logical_files():
+            try:
+                if q.stat().st_size <= 200_000_000:
+                    port._so_names[q] = set(SO_TOKEN.findall(q.read_bytes()))
+            except OSError:
+                pass
+    want = p.name.encode()
+    return any(want in names for q, names in port._so_names.items() if q != p)
+
+
 @check
 def binaries(port):
     scripts_all = "\n".join(script_text(port, s) for s in port.scripts)
@@ -442,21 +474,33 @@ def binaries(port):
                 yield Finding("libs.common", WARN, f"{rel} is near-universal on CFW images; bundling only bloats the port.", file=rel,
                               fix="Remove it and test on device; add back only if a device reports it missing.")
         so = elf_info(p)["soname"]
-        if so and p.name != so and p.name not in scripts_all:
+        if so and p.name != so and p.name not in scripts_all and not _named_elsewhere(port, p):
             if (p.parent / so).exists():
                 if re.search(r"\bmono\b|dotnet", scripts_all, re.I):
                     continue   # .NET P/Invoke opens the unversioned name, native libs NEED the SONAME: both copies are used
                 yield Finding("libs.duplicate", WARN, f"{rel} duplicates {so} in the same folder; ship only {so}.", file=rel, fix="Delete it.")
             else:
-                if not any(q != p and p.name.encode() in q.read_bytes() for q, _ in elves(port)):   # dlopen()ed by this name
-                    yield Finding("libs.soname", WARN, f"{rel} should be named after its SONAME {so!r}.", file=rel)
+                yield Finding("libs.soname", WARN, f"{rel} should be named after its SONAME {so!r}.", file=rel)
+    pj = json_load(port)
+    rts = " ".join(map(str, ((pj.get("attr") or {}).get("runtime") or []) if isinstance(pj, dict) else [])) + " " + scripts_all
+    provided = list(data.CFW_PROVIDED)
+    if re.search(r"weston", rts):
+        provided.append(re.compile(r"^lib(X\w*|xcb\S*|GLU|xkbcommon\S*|wayland-\S+)\.so"))
+    if re.search(r"qt6", rts, re.I):
+        provided.append(re.compile(r"^libQt6\w+\.so"))
+    needers = {}
     for p, info in elves(port):
         rel = port.rel(p)
+        if re.search(r"(^|/)(jre|jdk)[^/]*/", rel):
+            continue   # a bundled JRE's optional AWT/sound libs load lazily
         for n in info["needed"]:
-            if n in bundled or any(rx.match(n) for rx in data.CFW_PROVIDED):
-                continue
-            yield Finding("bin.needed", WARN, f"{rel} needs {n}, which is not bundled and not a known CFW library.", file=rel,
-                          fix=f"Bundle {n} in libs.aarch64/ (one real file, named {n}) or confirm every CFW ships it.")
+            if n not in bundled and not any(rx.match(n) for rx in provided):
+                needers.setdefault(n, rel)
+    if needers:
+        libs = sorted(needers)
+        shown = ", ".join(f"{n} ({needers[n]})" for n in libs[:8]) + (f" and {len(libs) - 8} more" if len(libs) > 8 else "")
+        yield Finding("bin.needed", INFO, f"{len(libs)} needed librar{'y' if len(libs) == 1 else 'ies'} not bundled and not on the known CFW list: {shown}.",
+                      fix="Check on device; bundle a library only if a device reports it missing.")
     # Bundled language runtimes where PortMaster ships a squashfs
     for p in port.logical_files():
         rel = port.rel(p)
@@ -499,7 +543,7 @@ def archives(port):
 def licences(port):
     if port.gamedir is None:
         return
-    lic = next((d for d in port.gamedir.iterdir() if d.is_dir() and d.name.lower() in ("licenses", "license")), None)
+    lic = next((d for d in port.gamedir.iterdir() if d.is_dir() and d.name.lower() in ("licenses", "license", "licences", "licence")), None)
     pj = json_load(port)
     attr = (pj.get("attr") or {}) if isinstance(pj, dict) else {}
     if attr.get("rtr") is True and not _game_licence(port, lic, attr):
@@ -514,21 +558,41 @@ def licences(port):
         if f.is_file() and f.stat().st_size < 2_000_000:
             corpus += " " + port.read_text(f).lower()
     squashed = re.sub(r"[^a-z0-9]", "", corpus)
+    tokens = set()
+    for f in lic.rglob("*"):
+        for t in re.split(r"[^a-z0-9+]+", f.name.lower()):
+            if len(t) >= 3 and t not in ("license", "licence", "licenses", "copying", "copyright", "txt", "notice", "readme"):
+                tokens.add(t)
+                core = re.sub(r"\d+$", "", re.sub(r"^lib", "", t))   # libbrotli1.copyright -> brotli
+                if len(core) >= 3:
+                    tokens.add(core)
     main_bins = {f"{port.gamedir.name}.aarch64", port.gamedir.name}
+    LIB_DIR = re.compile(r"(^|/)(libs?(\.[\w]+)?|gl4es[^/]*|lib/arm64-v8a)/")
+    TOOLS = re.compile(r"^(astcenc|oggenc|oggdec|ffmpeg|ffprobe|7z\w*|xdelta3?|innoextract|box64|box86|unrar|bsdtar|lz4|zstd)(\.\w+)?$")
     for p, info in elves(port):
         if p.name in main_bins:
             continue
-        is_lib = ".so" in p.name
-        if not is_lib and p.parent == port.gamedir:
-            continue  # the port's own executables
+        rel = port.rel(p)
+        # a component that brings its own licence tree (a JRE's legal/, a runtime's LICENSE)
+        if any((d / "legal").is_dir() or any(d.glob("LICENSE*")) for d in p.parents if port.gamedir in d.parents):
+            continue
+        if not (LIB_DIR.search(rel) or TOOLS.match(p.name)):
+            continue   # the port's own programs and engine modules
         stem = re.sub(r"^lib", "", p.name.split(".so")[0]).lower()
         stem = re.sub(r"[-.]\d+(\.\d+)*$", "", stem)
         camel = re.split(r"(?<=[a-z])(?=[A-Z])", re.sub(r"^lib", "", p.name.split(".so")[0]))[0].lower()
         cands = {re.sub(r"[^a-z0-9]", "", stem), re.split(r"[_\-.]", stem)[0], re.sub(r"file$", "", stem), camel}
         cands = {c for c in cands if len(c) > 2}
+        gl = next((d.name.split(".")[0].lower() for d in p.parents if d.name.lower().startswith("gl4es")), None)
+        if gl:
+            cands.add(gl)
+        flat = re.sub(r"[^a-z0-9]", "", stem)
+        if any(flat.startswith(t) or t.startswith(flat) for t in tokens if len(t) >= 3):
+            continue
         if cands and not any(c in squashed for c in cands):
-            yield Finding("licenses.component", WARN, f"No licence found mentioning {stem!r} ({port.rel(p)}).", file=port.rel(p),
-                          fix=f"Add {port.rel(lic)}/LICENSE.{stem}.")
+            name = gl or stem
+            yield Finding("licenses.component", WARN, f"No licence found mentioning {name!r} ({port.rel(p)}).", file=port.rel(p),
+                          fix=f"Add {port.rel(lic)}/LICENSE.{name}.")
 
 
 GENERIC_LICENCE = re.compile(r"^(licen[cs]e|copying|eula|permission)s?(\.(txt|md))?$", re.I)
@@ -574,8 +638,15 @@ def _script(port, s):
         yield Finding("sh.crlf", ERROR, "Windows (CRLF) line endings; bash fails on device.", file=f, fix="dos2unix the script.")
     text = raw.decode("utf-8", "replace")
     lines = text.splitlines()
+    # a short wrapper that runs another of the port's launch scripts (e.g. "Game MP.sh" -> exec "Game.sh" MP):
+    # the header, gptokeyb and pm_finish live in the script it runs
+    others = [o.name for o in port.scripts if o != s]
+    real = [l for l in lines[1:] if l.strip() and not l.strip().startswith("#")]
+    if others and len(real) <= 8 and any(o in l and re.search(r"\bexec\b|^\s*\"?\$", l) for o in others for l in real):
+        return
     if not lines or not lines[0].startswith("#!/bin/bash"):
-        yield Finding("sh.shebang", ERROR, "First line must be #!/bin/bash.", file=f, line=1)
+        env_bash = bool(lines) and re.match(r"#!\s*/usr/bin/env\s+bash\b", lines[0])
+        yield Finding("sh.shebang", WARN if env_bash else ERROR, "First line must be #!/bin/bash.", file=f, line=1)
     for n, line in enumerate(lines[1:], 2):
         st = line.strip()
         if not st or st.startswith("# PORTMASTER:"):
@@ -597,10 +668,15 @@ def _script(port, s):
         (r"^\s*get_controls\b", "sh.get_controls", "get_controls is not called."),
     ):
         if not re.search(need, body, re.M):
+            if rid == "sh.control" and "control.txt" in body and re.search(r"^\s*(source|\.)\s+\"?\$\{?\w+\}?\"?\s*$", body, re.M):
+                continue   # found by a search loop, sourced through a variable
             yield Finding(rid, WARN, msg, file=f)
     if not re.search(r"^\s*pm_finish\b", body, re.M):
         yield Finding("sh.pm_finish", WARN, "pm_finish is not called at the end.", file=f)
+    shim_fwd = re.search(r"SDL3SHIM_SDL2_(VIDEO|AUDIO)DRIVER=", body)
     for n, l in grep(r"\bSDL_(VIDEO|AUDIO)DRIVER="):
+        if shim_fwd:
+            continue   # sdl3-sdl2-backend pattern: the CFW's driver goes to SDL3SHIM_SDL2_*, the game gets sdl2
         sev = WARN if "sdl2" in l.lower() and "SDL3SHIM" in body else ERROR
         if sev == ERROR and re.search(r"DRIVER=\"?\$\{SDL_(VIDEO|AUDIO)DRIVER:-", l):
             yield Finding("sh.sdl-driver", WARN, "Sets an SDL driver default; when the CFW leaves it unset SDL would pick the backend itself.", file=f, line=n,
@@ -620,11 +696,15 @@ def _script(port, s):
             continue
         yield Finding("sh.tar-z", ERROR, "tar -z is unsupported on some BusyBox builds.", file=f, line=n,
                       fix='gunzip -c "$ARCHIVE_FILE" | tar --no-same-owner -xf -')
-    for n, l in grep(r"\btar\b.*\bx[a-z]*f\b|\btar\s+-x"):
-        if "--no-same-owner" not in l:
-            yield Finding("sh.tar-owner", WARN, "Extract with tar --no-same-owner.", file=f, line=n)
-    for n, l in grep(r"(^|\s|export\s+)HOME=|(^|\s|export\s+)XDG_CONFIG_HOME="):
-        yield Finding("sh.home", ERROR, "Don't redirect HOME/XDG_CONFIG_HOME (PulseAudio symlink fails on FAT); use bind_directories.", file=f, line=n)
+    tars = [n for n, l in grep(r"\btar\b.*\bx[a-z]*f\b|\btar\s+-x") if "--no-same-owner" not in l]
+    if tars:
+        more = f" (also lines {', '.join(map(str, tars[1:]))})" if len(tars) > 1 else ""
+        yield Finding("sh.tar-owner", WARN, f"Extract with tar --no-same-owner{more}.", file=f, line=tars[0],
+                      fix='gunzip -c "$ARCHIVE_FILE" | tar --no-same-owner -xf -')
+    hits = grep(r"(^|\s|export\s+)HOME=|(^|\s|export\s+)XDG_CONFIG_HOME=")
+    if hits:
+        more = f" (also lines {', '.join(str(n) for n, _ in hits[1:])})" if len(hits) > 1 else ""
+        yield Finding("sh.home", ERROR, f"Don't redirect HOME/XDG_CONFIG_HOME (PulseAudio symlink fails on FAT); use bind_directories{more}.", file=f, line=hits[0][0])
     for n, l in grep(r"XDG_DATA_HOME=|XDG_CACHE_HOME="):
         if BOILER.match(l.strip()) and "${XDG_DATA_HOME:-" in l:
             continue
@@ -655,7 +735,8 @@ def _script(port, s):
         for k, v in vars_.items():
             if k not in ("GAMEDIR", "HOME", "directory"):
                 before_r = re.sub(r"\$\{?" + k + r"\}?(?!\w)", v.replace("\\", "\\\\"), before_r)
-        if not re.search(rf"{verb}\b[^\n]*{re.escape(src)}/?\"?(\s|$)", before_r, re.M):
+        sub = r"(/[^\"\s]*)?" if verb == "mkdir" else ""   # mkdir -p of a path below the source creates it too
+        if not re.search(rf"{verb}\b[^\n]*{re.escape(src)}{sub}/?\"?(\s|$)", before_r, re.M):
             yield Finding("sh.bind-source", WARN, f"bind_{m.group(1)} source {src} must exist first ({verb} it before this line), or the bind silently no-ops.",
                           file=f, line=n)
     for i, (n, l) in enumerate(code):
@@ -689,14 +770,22 @@ def _script(port, s):
         if "|" in l:
             yield Finding("sh.paste", WARN, "ROCKNIX's paste uploads stdin to dpaste.com; don't pipe into paste.", file=f, line=n)
     # Comment noise: long comment blocks belong in docs, not the script.
-    run = 0
+    run, blocks = 0, []
     for n, l in enumerate(lines, 1):
         if l.strip().startswith("#") and n > 1 and not l.strip().startswith("# PORTMASTER:"):
             run += 1
             if run == 3:
-                yield Finding("sh.comments", INFO, "Multi-line comment block; keep comments to one short line per fix.", file=f, line=n - 2)
+                blocks.append(n - 2)
         else:
             run = 0
+    if blocks:
+        more = f" (also lines {', '.join(map(str, blocks[1:]))})" if len(blocks) > 1 else ""
+        yield Finding("sh.comments", INFO, f"Multi-line comment block{'s' if len(blocks) > 1 else ''}; keep comments to one short line per fix{more}.", file=f, line=blocks[0])
+    if not shutil.which("shellcheck") and shutil.which("bash"):
+        # parse only (-n): nothing in the script runs
+        r = subprocess.run(["bash", "-n", str(s)], capture_output=True, text=True, timeout=30)
+        for m in re.finditer(r"line (\d+): (.+)", r.stderr):
+            yield Finding("sh.syntax", ERROR, f"bash: {m.group(2)}", file=f, line=int(m.group(1)))
     if shutil.which("shellcheck"):
         out = _run(["shellcheck", "-S", "error", "-f", "json", "-s", "bash", str(s)])
         try:
@@ -708,8 +797,12 @@ def _script(port, s):
         yield Finding("sh.no-gptokeyb", ERROR, "No gptokeyb launched, so there is no hotkey exit (Select+Start).", file=f,
                       fix='Launch it before the game, e.g. $GPTOKEYB2 "$BINARY" & (no -c needed for the kill switch alone), or $GPTOKEYB "$BINARY" &.')
     for n, l in grep(r"\b(kill\b.*\$\(\s*pidof\s+gptokeyb|pkill\b.*gptokeyb|killall\b.*gptokeyb)"):
-        yield Finding("sh.kill-gptokeyb", WARN, "Obsolete: pm_finish and patcher.txt already stop gptokeyb (pm_gptokeyb_finish).", file=f, line=n,
-                      fix="Delete the line.")
+        i = next(k for k, (m, _) in enumerate(code) if m == n)
+        after_patcher = any("patcher.txt" in x for x in [x for _, x in code[:i] if x.strip()][-1:])
+        if not after_patcher and any(re.search(r"\$\{?GPTOKEYB2?\b", x) for _, x in code[i + 1:]):
+            continue   # stops one gptokeyb (e.g. a launcher's) before the game starts its own
+        yield Finding("sh.kill-gptokeyb", WARN, "Obsolete: pm_finish and patcher.txt stop gptokeyb themselves (pm_gptokeyb_finish).", file=f, line=n,
+                      fix="Delete the line; end the script with pm_finish (it replaces the old kill / oga_events / printf cleanup).")
     for n, l in grep(r"^\s*exec\s*>\s*\"?\$\{?GAMEDIR\}?/log\.txt\"?\s*2>&1\s*$"):
         yield Finding("sh.log-old", WARN, "Old logging line.", file=f, line=n,
                       fix='> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1')

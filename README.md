@@ -17,6 +17,11 @@ python3 -m unittest discover -s tests -t .
 
 Exit codes: 0 ok, 1 errors found (0 with `--warn-only`), 2 could not load.
 
+## Tests
+- `tests/test_mutations.py`: about 100 planted errors, each injected into a clean port, must be caught at the right severity; about 50 valid variants (template lines, quoted paths, wrapper scripts, shim builds ...) must add no ERROR or WARN. Every false positive found in a real port gets a valid variant here.
+- `tests/test_rules.py`: rule details, layouts, zip safety.
+- Real-port corpus (local, not in this repo): `/root/compile/pmcheck-corpus/run.py` checks about 120 ports (testing-thread zips, PRs, a PortMaster-New sample, Cebion's ports) against a reviewed baseline and prints every new or vanished finding.
+
 ## Rules
 `pmcheck/rules.py` (one `@check` function per area), `pmcheck/ini.py` (gptokeyb2), lists in `pmcheck/data.py`.
 The AI prompt is `pmcheck/prompt/rules.md`, so admins can edit it without touching code.

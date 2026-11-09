@@ -39,6 +39,7 @@ def check_gptk(text, f):
             yield Finding("gptk.syntax", WARN, f"Line is not 'button = key': {s[:40]!r}.", file=f, line=n)
             continue
         k, v = (x.strip() for x in s.split("=", 1))
+        v = re.split(r"\s+#", v, 1)[0].strip()   # "a = enter   # note": fscanf reads enter, then skips the '#...' line rest
         if not re.fullmatch(r"\S+", k):
             yield Finding("gptk.syntax", WARN, f"Button name {k!r} contains spaces.", file=f, line=n)
             continue
