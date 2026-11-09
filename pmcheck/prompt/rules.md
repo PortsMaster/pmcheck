@@ -27,6 +27,7 @@ Severity: "error" = breaks on a device; "warning" = likely problem with low impa
 - gameinfo.xml `<image>./<gamedir>/cover.png</image>` or `./<gamedir>/screenshot.png` while the PR keeps the file next to the .sh: PortMaster installs it into the game folder, so the subfolder path is correct.
 - port.json `runtime` entries with or without `.squashfs` (harbourmaster adds the suffix itself; merged ports use both).
 - gptokeyb2 without `-c` (kill switch only, or the game reads the pad itself), and `$GPTOKEYB2 ... -x` (gptokeyb2's virtual Xbox 360 pad mode). Neither fails to start.
+- A gptokeyb kill target that is a prefix of the binary name, e.g. `godot471` for `godot471.$DEVICE_ARCH`. gptokeyb kills with `pkill -9 '<name>'`, a regex match on the process name, which Linux truncates to 15 characters; a prefix matches, so no `.${DEVICE_ARCH}` suffix is needed.
 - `pm_message "text"` without options (older template style). The log redirect `> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1` (the old `exec > "$GAMEDIR/log.txt" 2>&1` is flagged by the rule checker).
 
 ## Hard rules
