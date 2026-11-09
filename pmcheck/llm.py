@@ -130,6 +130,26 @@ def build_input(port, findings):
     return "\n\n".join(parts)
 
 
+# AI findings the model keeps making although rules.md lists them as valid; dropped in code.
+def _has(t, *pats):
+    return all(re.search(p, t) for p in pats)
+
+
+KNOWN_FALSE = (
+    # harbourmaster appends .squashfs when missing (harbour.py:1172); both spellings are merged
+    lambda t: _has(t, r"\.squashfs", r"extension|suffix|remove|without|must not|should not"),
+    # -x is gptokeyb2's virtual xbox360 mode and switches config mode off (main.c:245); no -c needed
+    lambda t: _has(t, r"gptokeyb", r"(^|\s)-x\b", r"(^|\s)-c\b|\bini\b|config"),
+    # gptokeyb kills with pkill (regex on the 15-char process name); a prefix of the binary matches
+    lambda t: _has(t, r"gptokeyb|kill", r"device_arch|\.aarch64|suffix", r"suffix|missing|target|binary name|process name"),
+)
+
+
+def known_false(it):
+    t = f"{it.get('issue', '')} {it.get('fix', '')}".lower()
+    return any(f(t) for f in KNOWN_FALSE)
+
+
 RETRY_CODES = {429, 500, 502, 503, 504, "timeout"}
 RETRY_DELAYS = (0, 5, 20)
 
@@ -212,6 +232,8 @@ def review(port, findings, api_key=None, model=None, timeout=150):
                 f = findings[int(m.group(1)) - 1]
                 disputes.append({"kind": "dispute", "rule": f.rule, "file": f.file, "line": f.line,
                                  "finding": f.message[:200], "issue": str(it["issue"])[:500]})
+            continue
+        if known_false(it):
             continue
         it = {k: it[k] for k in ("severity", "file", "line", "issue", "fix") if k in it}
         for k in ("issue", "fix", "file"):
