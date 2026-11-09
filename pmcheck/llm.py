@@ -137,11 +137,11 @@ def _has(t, *pats):
 
 KNOWN_FALSE = (
     # harbourmaster appends .squashfs when missing (harbour.py:1172); both spellings are merged
-    lambda t: _has(t, r"\.squashfs", r"extension|suffix|remove|without|must not|should not"),
-    # -x is gptokeyb2's virtual xbox360 mode and switches config mode off (main.c:245); no -c needed
-    lambda t: _has(t, r"gptokeyb", r"(^|\s)-x\b", r"(^|\s)-c\b|\bini\b|config"),
+    lambda t: "squashfs" in t and _has(t, r"extension|suffix|remove|without|must not|should not|catalog key"),
+    # gptokeyb2 -x (virtual xbox360 pad, config mode off, main.c:245) and -c are both optional: any flag advice is dropped
+    lambda t: "gptokeyb" in t and _has(t, r"(?<![\w-])-[xc]\b|xbox|\bini\b|config file|configuration file"),
     # gptokeyb kills with pkill (regex on the 15-char process name); a prefix of the binary matches
-    lambda t: _has(t, r"gptokeyb|kill", r"device_arch|\.aarch64|suffix", r"suffix|missing|target|binary name|process name"),
+    lambda t: _has(t, r"gptokeyb|kill", r"device_arch|\.aarch64|arch suffix"),
 )
 
 

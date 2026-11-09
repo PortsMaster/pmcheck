@@ -12,6 +12,9 @@ class KnownFalse(unittest.TestCase):
             ("gptokeyb2 is invoked with the flag -x without specifying an ini config file via -c.",
              "Provide a valid gptokeyb2 ini configuration file or remove the invalid invocation parameters."),
             ("gptokeyb2 target binary name is missing the .${DEVICE_ARCH} suffix.", ""),
+            ("gptokeyb2 is invoked with the virtual xbox gamepad flag '-x' but lacks an ini configuration file path via '-c', preventing proper button remapping and hotkey assignment.",
+             "Provide a gptokeyb2 configuration ini file and reference it with '-c' instead of '-x'."),
+            ("`$GPTOKEYB2 \"game\" -c` points to a missing .ini; controls will not work.", ""),
         ]:
             self.assertTrue(known_false({"issue": issue, "fix": fix}), issue)
 

@@ -806,6 +806,19 @@ def _script(port, s):
     for n, l in grep(r"^\s*exec\s*>\s*\"?\$\{?GAMEDIR\}?/log\.txt\"?\s*2>&1\s*$"):
         yield Finding("sh.log-old", WARN, "Old logging line.", file=f, line=n,
                       fix='> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1')
+    # -c pointing at a control file the package doesn't have: gptokeyb then maps nothing
+    cd_gamedir = re.search(r"^\s*cd\s+\"?\$\{?GAMEDIR\}?/?\"?\s*(;|&&|$)", body, re.M)
+    for n, l in code:
+        m = re.search(r"GPTOKEYB2?\}?\"?\s.*?\s-c\s+(\"[^\"]+\"|'[^']+'|\S+)", l)
+        if not m:
+            continue
+        arg = m.group(1).strip("\"'")
+        target = _resolve(port, arg) if "$" in arg else (port.gamedir / arg if cd_gamedir and port.gamedir is not None else None)
+        base = arg.rsplit("/", 1)[-1]
+        made = any(base in x for k, x in code if k != n)   # copied, generated or chosen elsewhere in the script
+        if target is not None and not made and not target.exists():
+            yield Finding("sh.gptk-missing", ERROR, f"gptokeyb is started with -c {arg!r}, but the package has no such file, so no button is mapped.",
+                          file=f, line=n, fix="Ship the file, fix the name, or drop -c if gptokeyb is only the hotkey exit.")
     # Control files referenced by the script
     if port.gamedir is not None and not re.search(r"GPTOKEYB2?\}?\"?\s.*\s-c\b", body):
         for p in sorted(port.gamedir.glob("*.ini")):

@@ -116,6 +116,8 @@ MUTATIONS = [
     ("portmsg direct", insert('./portmsg.${DEVICE_ARCH} "Hello"\n'), "sh.portmsg", "ERROR"),
     ("plain sudo", insert("sudo chmod 666 /dev/uinput\n"), "sh.sudo", "WARN"),
     ("no gptokeyb", lambda r: sh(r, lambda s: s.replace(LAUNCH, "")), "sh.no-gptokeyb", "ERROR"),
+    ("-c file missing", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB2 "testgame.aarch64" -c "./nothere.ini" &\n')), "sh.gptk-missing", "ERROR"),
+    ("-c $GAMEDIR file missing", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB2 "testgame.aarch64" -c "$GAMEDIR/nothere.ini" &\n')), "sh.gptk-missing", "ERROR"),
     ("old log line", insert('exec > "$GAMEDIR/log.txt" 2>&1\n'), "sh.log-old", "WARN"),
     ("kill gptokeyb after patcher", insert('source "$controlfolder/utils/patcher.txt"\n$ESUDO kill -9 $(pidof gptokeyb)\n'), "sh.kill-gptokeyb", "WARN"),
     ("echo before exit", insert('if [ ! -f data.pak ]; then\n  echo "data.pak missing"\n  exit 1\nfi\n'), "sh.echo-message", "WARN"),
@@ -218,6 +220,8 @@ VALID = [
     ("classic gptokeyb", lambda r: sh(r, lambda s: s.replace("$GPTOKEYB2", "$GPTOKEYB"))),
     ("classic .gptk", lambda r: gptk(r, "back = esc\nstart = enter\na = space\nb = \\\"\nup = up\nup = repeat\n")),
     ("gptokeyb2 -x mode", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB2 "testgame.aarch64" -x &\n'))),
+    ("-c file made by the script", lambda r: sh(r, lambda s: s.replace(LAUNCH, 'cp "$GAMEDIR/conf/default.ini" "$GAMEDIR/made.ini"\n$GPTOKEYB2 "testgame.aarch64" -c "$GAMEDIR/made.ini" &\n'))),
+    ("-c controlfolder template", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB "testgame.aarch64" -c "$controlfolder/gamecontrollerdb.txt" &\n'))),
     ("helper ini not for gptokeyb", both(write("testgame/helper.ini", "[controls]\na = context_click\n"),
                                          insert('HELPER="$GAMEDIR/helper.ini"\n'))),
     ("gptokeyb2 select alias", lambda r: ini(r, "[controls]\nselect = esc\n")),
@@ -256,7 +260,8 @@ VALID = [
     ("lib loaded by its unversioned name", lambda r: (lib(r, "libfoo.so", fixture="libfoo.so.1"), write("testgame/game.config", '<dllmap dll="foo" target="libfoo.so"/>')(r))),
     ("wrapper script", both(write("Test Game MP.sh", '#!/bin/bash\nSCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"\nexec "$SCRIPT_DIR/Test Game.sh" MP\n'),
                             lambda r: pj(r, _items=["Test Game.sh", "Test Game MP.sh", "testgame"]))),
-    ("kill between launcher and game", insert('$GPTOKEYB "love" -c "$GAMEDIR/launcher.gptk" &\n$LOVE_RUN launcher\n$ESUDO pkill -9 -f "gptokeyb"\n')),
+    ("kill between launcher and game", both(write("testgame/launcher.gptk", "back = esc\nstart = enter\n"),
+                                            insert('$GPTOKEYB "love" -c "$GAMEDIR/launcher.gptk" &\n$LOVE_RUN launcher\n$ESUDO pkill -9 -f "gptokeyb"\n'))),
     ("tar data with guard", insert('ARCHIVE_FILE="gamedata.tar.gz"\nif [[ -f "$ARCHIVE_FILE" ]]; then\n'
                                    '    pm_message "Extracting" --title "Please wait"\n'
                                    '    if ! gunzip -c "$ARCHIVE_FILE" | tar --no-same-owner -xf -; then\n'
