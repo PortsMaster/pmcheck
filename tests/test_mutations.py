@@ -116,6 +116,7 @@ MUTATIONS = [
     ("portmsg direct", insert('./portmsg.${DEVICE_ARCH} "Hello"\n'), "sh.portmsg", "ERROR"),
     ("plain sudo", insert("sudo chmod 666 /dev/uinput\n"), "sh.sudo", "WARN"),
     ("no gptokeyb", lambda r: sh(r, lambda s: s.replace(LAUNCH, "")), "sh.no-gptokeyb", "ERROR"),
+    ("pm_message sleep exit", insert('if [ ! -f "$GAMEDIR/data.pak" ]; then\n  pm_message "Put data.pak in ports/testgame."\n  sleep 8\n  pm_finish\n  exit 1\nfi\n'), "sh.pm-message-error", "INFO"),
     ("-c file missing", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB2 "testgame.aarch64" -c "./nothere.ini" &\n')), "sh.gptk-missing", "ERROR"),
     ("-c $GAMEDIR file missing", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB2 "testgame.aarch64" -c "$GAMEDIR/nothere.ini" &\n')), "sh.gptk-missing", "ERROR"),
     ("old log line", insert('exec > "$GAMEDIR/log.txt" 2>&1\n'), "sh.log-old", "WARN"),

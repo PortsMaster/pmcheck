@@ -14,6 +14,7 @@ class KnownFalse(unittest.TestCase):
             ("gptokeyb2 target binary name is missing the .${DEVICE_ARCH} suffix.", ""),
             ("gptokeyb2 is invoked with the virtual xbox gamepad flag '-x' but lacks an ini configuration file path via '-c', preventing proper button remapping and hotkey assignment.",
              "Provide a gptokeyb2 configuration ini file and reference it with '-c' instead of '-x'."),
+            ("The rule checker reported F1 regarding armhf binaries, but the port intentionally supports both 32-bit (armhf) and 64-bit (aarch64) target routes.", ""),
             ("`$GPTOKEYB2 \"game\" -c` points to a missing .ini; controls will not work.", ""),
         ]:
             self.assertTrue(known_false({"issue": issue, "fix": fix}), issue)

@@ -299,7 +299,16 @@ def port_json(port):
             else:
                 yield Finding("port.json.arch", WARN, f"Ships {a} binaries but arch does not list {a}.", file=f)
     # min_glibc
-    need = [(i["glibc"], p) for p, i in elves(port) if i["glibc"]]
+    # harbourmaster compares min_glibc with the native glibc (device_info.txt CFW_GLIBC, getconf), so binaries
+    # of an arch the port doesn't list (armhf next to aarch64) only need the 32-bit userland's own glibc
+    allg = [(i["glibc"], p, i["arch"]) for p, i in elves(port) if i["glibc"]]
+    need = [(g, p) for g, p, a in allg if not arch or a in arch]
+    other = [(g, p) for g, p, a in allg if arch and a not in arch]
+    if other:
+        otop, ofile = max(other, key=lambda x: version_tuple(x[0]))
+        if not need or version_tuple(otop) > version_tuple(max(need, key=lambda x: version_tuple(x[0]))[0]):
+            yield Finding("port.json.min_glibc", INFO, f"{port.rel(ofile)} needs GLIBC_{otop} from the 32-bit userland; min_glibc only covers the native one, "
+                          "so the script has to check it before choosing that route.", file=f)
     if need:
         top, top_file = max(need, key=lambda x: version_tuple(x[0]))
         mg = str(attr.get("min_glibc") or "")
@@ -754,6 +763,18 @@ def _script(port, s):
                 and not any(re.search(r"\bpm_(message|show_error)\b", x) for x in near)):
             yield Finding("sh.echo-message", WARN, "This message goes to the log, the player never sees it before the exit.", file=f, line=n,
                           fix='pm_show_error "..." --title "..."   (or pm_message on older templates)')
+    # pm_message + sleep before an error exit: pm_show_error waits for the player instead of a fixed time
+    hits = []
+    for i, (n, l) in enumerate(code):
+        if not re.match(r"\s*pm_message\b", l):
+            continue
+        rest = [x.strip() for _, x in code[i + 1:i + 5] if x.strip()]
+        if rest and rest[0].startswith("sleep") and any(re.match(r"exit\s+[1-9]", x) for x in rest[1:3]):
+            hits.append(n)
+    if hits:
+        more = f" (also lines {', '.join(map(str, hits[1:]))})" if len(hits) > 1 else ""
+        yield Finding("sh.pm-message-error", INFO, f"Error message shown with pm_message and sleep; pm_show_error stays up until the player closes it{more}.",
+                      file=f, line=hits[0], fix='pm_show_error "..." --title "..."   (drop the sleep)')
     for n, l in grep(r"^\s*(echo|printf)\b.*>\s*\"?(\$\{?CUR_TTY\}?|/dev/tty\d*)\"?"):
         if re.search(r"\\033c|\\e\[|\\033\[", l):
             continue   # clearing the console

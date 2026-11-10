@@ -147,6 +147,9 @@ KNOWN_FALSE = (
 
 def known_false(it):
     t = f"{it.get('issue', '')} {it.get('fix', '')}".lower()
+    # an "issue" about a rule finding is a dispute in the wrong shape (and its F number was wrong when seen)
+    if re.search(r"\bf\d+\b|rule checker|rule finding", t):
+        return True
     return any(f(t) for f in KNOWN_FALSE)
 
 
