@@ -3,7 +3,7 @@
 Env (see config.example.env):
   DISCORD_TOKEN, GUILD_ID, ADMIN_ROLE_IDS (comma separated), GEMINI_API_KEY,
   PMCHECK_GEMINI_MODEL (optional), MAX_DOWNLOAD_MB (default 1024), CHECK_TIMEOUT (default 900),
-  GITHUB_TOKEN (optional, read-only; raises the GitHub API limit for PR links)
+  GITHUB_TOKEN (read-only; PR links download each file through the GitHub API, raw downloads get HTTP 429)
 """
 import asyncio
 import io

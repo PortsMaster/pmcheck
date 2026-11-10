@@ -80,7 +80,7 @@ GITHUB_TOKEN=
 ```
 - `gemini-flash-latest` follows Google's current Flash model, so retirements don't break it. To pin a model, list the ones your key can use:
   `curl -s -H "x-goog-api-key: $GEMINI_API_KEY" https://generativelanguage.googleapis.com/v1beta/models | grep '"name"'`
-- `GITHUB_TOKEN` is optional. PR links use the GitHub API, about 5 calls per check; without a token GitHub allows 60 calls per hour per server IP. For more, create a fine-grained token at https://github.com/settings/personal-access-tokens with *Public repositories (read-only)* and no permissions.
+- `GITHUB_TOKEN` is needed for PR links in practice. A check makes about 5 API calls plus one per file. With a token the files come from the GitHub API (5000 calls per hour). Without one, the API allows 60 calls per hour per server IP, and the files come from raw.githubusercontent.com, which answers HTTP 429 once an IP downloads too much. Create a fine-grained token at https://github.com/settings/personal-access-tokens with *Public repositories (read-only)* and no permissions.
 - The bot refuses to start when `ADMIN_ROLE_IDS` is empty.
 
 ## 8. First run in the foreground
@@ -146,6 +146,7 @@ systemctl --user restart pmcheck-bot
 | `AI review unavailable (HTTP 503 ...)` | Google's free Flash model is overloaded. The bot retries twice (5 s, 20 s), then falls back to `gemini-flash-lite-latest` (`PMCHECK_GEMINI_FALLBACK`, empty disables it). If all fail, run the check again later; the rules report is complete either way. |
 | A PR link answers `input is not a zip file or folder` | The bot is older than 0.1.4. Pull, rebuild and restart (step 12), then check `journalctl`: a PR check logs `/checkport PR #<n>`. |
 | `GitHub API rate limit reached` | More than 60 GitHub API calls in an hour from the server; set `GITHUB_TOKEN`. |
+| `GitHub is rate limiting file downloads (HTTP 429)` | raw.githubusercontent.com limits anonymous downloads per IP; set `GITHUB_TOKEN`. |
 | `AI review unavailable (no answer ... within 150s)` | The model hung; the bot already tried the fallback model. Run the check again. |
 | `AI review unavailable (HTTP 404 ...)` | The model name is retired; set `PMCHECK_GEMINI_MODEL=gemini-flash-latest` and restart. |
 

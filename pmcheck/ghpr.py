@@ -1,11 +1,13 @@
 """Fetch the port folders of a PortMaster-New pull request (no git, no code execution).
 
-Uses the GitHub REST API (a few calls per PR; GITHUB_TOKEN raises the 60/hour anonymous limit)
-and downloads each file of ports/<name>/ at the PR head commit from raw.githubusercontent.com.
+Uses the GitHub REST API (a few calls per PR; GITHUB_TOKEN raises the 60/hour anonymous limit).
+Files of ports/<name>/ at the PR head commit come from the blob API with a token, else from
+raw.githubusercontent.com (which rate-limits anonymous downloads per IP).
 """
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,20 +32,32 @@ def pr_number(url):
     return int(m.group(1)) if m else None
 
 
-def _get(url, raw=False, timeout=60):
-    headers = {"User-Agent": "pmcheck", "Accept": "application/vnd.github+json"}
+def _get(url, raw=False, timeout=60, tries=5, accept="application/vnd.github+json"):
+    headers = {"User-Agent": "pmcheck", "Accept": accept}
     token = os.environ.get("GITHUB_TOKEN")
-    if token and url.startswith(API):
+    if token and url.startswith((API, RAW)):
         headers["Authorization"] = f"Bearer {token}"
-    try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as r:
-            return r.read() if raw else json.load(r)
-    except urllib.error.HTTPError as e:
-        if e.code == 403 and url.startswith(API):
-            raise PRError("GitHub API rate limit reached (60 requests/hour without GITHUB_TOKEN); try again later.")
-        raise PRError(f"GitHub returned HTTP {e.code} for {url.split('?')[0]}")
-    except (urllib.error.URLError, TimeoutError) as e:
-        raise PRError(f"GitHub not reachable ({e.__class__.__name__}).")
+    for attempt in range(tries):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as r:
+                return r.read() if raw else json.load(r)
+        except urllib.error.HTTPError as e:
+            # 429 (raw.githubusercontent.com) and 5xx are temporary: wait as told (capped), then retry
+            if (e.code == 429 or e.code >= 500) and attempt < tries - 1:
+                wait = e.headers.get("Retry-After", "")
+                time.sleep(min(int(wait), 60) if wait.isdigit() else 2 ** attempt * 3)
+                continue
+            if e.code in (403, 429) and url.startswith(API):
+                raise PRError("GitHub API rate limit reached (60 requests/hour without GITHUB_TOKEN); try again later.")
+            if e.code == 429:
+                raise PRError("GitHub is rate limiting file downloads (HTTP 429); try again in a few minutes"
+                              + ("." if token else ", or set GITHUB_TOKEN in the bot's env file."))
+            raise PRError(f"GitHub returned HTTP {e.code} for {url.split('?')[0]}")
+        except (urllib.error.URLError, TimeoutError) as e:
+            if attempt < tries - 1:
+                time.sleep(2 ** attempt * 3)
+                continue
+            raise PRError(f"GitHub not reachable ({e.__class__.__name__}).")
 
 
 def _subtree(repo, sha, name):
@@ -100,7 +114,7 @@ def fetch(url, dest, max_bytes, log=print):
             if any(p in ("", ".", "..") or not SAFE_PART.match(p) for p in parts):
                 raise PRError(f"Unsafe path in ports/{name}: {t['path']!r}")
             total += t.get("size", 0)
-            jobs.append((name, t["path"]))
+            jobs.append((name, t["path"], t["sha"]))
     if not jobs:
         raise PRError(f"PR #{n} only deletes ports; nothing to check.")
     if len(jobs) > MAX_FILES:
@@ -111,13 +125,17 @@ def fetch(url, dest, max_bytes, log=print):
     dest = Path(dest)
 
     def one(job):
-        name, path = job
-        q = urllib.parse.quote(f"ports/{name}/{path}")
-        data = _get(f"{RAW}/{repo}/{sha}/{q}", raw=True, timeout=300)
+        name, path, blob = job
+        if os.environ.get("GITHUB_TOKEN"):
+            # blob API: 5000/hour with a token; raw.githubusercontent.com rate-limits per IP (HTTP 429)
+            data = _get(f"{API}/repos/{repo}/git/blobs/{blob}", raw=True, timeout=300, accept="application/vnd.github.raw")
+        else:
+            q = urllib.parse.quote(f"ports/{name}/{path}")
+            data = _get(f"{RAW}/{repo}/{sha}/{q}", raw=True, timeout=300)
         out = dest / name / path
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(data)
 
-    with ThreadPoolExecutor(8) as ex:
+    with ThreadPoolExecutor(4) as ex:
         list(ex.map(one, jobs))
     return info, [dest / name for name in names if (dest / name).is_dir()]
