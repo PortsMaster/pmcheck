@@ -185,10 +185,10 @@ def _call(model, body, api_key, timeout):
 
 
 def review(port, findings, api_key=None, model=None, timeout=150):
-    """Returns a list of dicts, or a string explaining why there is no AI review."""
+    """Returns a list of dicts, a string explaining a failed review, or None without an API key (no AI section)."""
     api_key = api_key or os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        return "AI review skipped: no GEMINI_API_KEY."
+        return None
     model = model or os.environ.get("PMCHECK_GEMINI_MODEL", DEFAULT_MODEL)
     system = PROMPT_FILE.read_text() if PROMPT_FILE.exists() else ""
     ref = engine_reference(port)
