@@ -16,7 +16,7 @@ SPECIAL = set(
     "remove_letter repeat set_state".split()
 )
 STICK_KEYS = re.compile(r"^(left|right)_analog(_(up|down|left|right))?$")
-STATE_DIRECTIVES = {"overlay", "charset", "wordset", "mouse_wheel_amount"}
+STATE_DIRECTIVES = {"overlay", "charset", "wordset", "mouse_wheel_amount", "exclusive"}
 MOUSE_CONFIG = {"deadzone_mode", "deadzone_scale", "deadzone_x", "deadzone_y"}
 
 

@@ -277,8 +277,19 @@ def port_json(port):
     for r in runtimes:
         if " " in r:
             yield Finding("port.json.runtime", ERROR, f"runtime {r!r} is a display label; use the catalog key (e.g. weston_pkg_0.2).", file=f)
-        elif data.RUNTIME_ARCH_SUFFIX.search(r) and not r.startswith("mono-"):
-            yield Finding("port.json.runtime", ERROR, f"runtime {r!r} has an arch suffix; use the generic key.", file=f)
+        else:
+            # harbourmaster appends .squashfs and looks the name up in the catalog (harbour.py runtime_check)
+            sq = r if r.endswith(".squashfs") else r + ".squashfs"
+            cat = data.RUNTIMES
+            if sq in cat["keys"]:
+                pass
+            elif sq in cat["files"]:
+                yield Finding("port.json.runtime", ERROR, f"runtime {r!r} is the file name of one arch build; use the catalog key.", file=f,
+                              fix=f'"runtime": ["{cat["files"][sq]}"]')
+            else:
+                yield Finding("port.json.runtime", ERROR, f"runtime {r!r} is not in PortMaster's runtime catalog (checked {cat['updated']}); "
+                              "harbourmaster refuses it as an unknown runtime, so the port can't download it.", file=f,
+                              fix="Use a published runtime, or get the new runtime added to PortMaster first.")
     arch = attr.get("arch") or []
     found = sorted({i["arch"] for _, i in elves(port)})
     bad = [a for a in arch if a not in data.ARCHES]
@@ -481,7 +492,8 @@ def binaries(port):
             x11_done = True
             yield Finding("libs.x11", WARN, f"Bundles X11 libraries ({rel.rsplit('/', 1)[0]}/libX*, libxcb*) without Westonpack. On KMS/DRM devices nothing draws through X11, the binary only links it.", file=rel,
                           fix="Rebuild without X11 and drop the libX*/libxcb* files (OHRRPGCE: scons gfx=sdl2 no_x11=1).")
-        for rx in data.COMMON_LIBS:
+        # a fallback/ folder is only linked when the CFW lacks the library (runtime.src find_library pattern)
+        for rx in data.COMMON_LIBS if "fallback" not in p.parent.name.lower() else ():
             if rx.match(name):
                 yield Finding("libs.common", WARN, f"{rel} is near-universal on CFW images; bundling only bloats the port.", file=rel,
                               fix="Remove it and test on device; add back only if a device reports it missing.")
@@ -767,13 +779,25 @@ def _script(port, s):
             yield Finding("sh.echo-message", WARN, "This message goes to the log, the player never sees it before the exit.", file=f, line=n,
                           fix='pm_show_error "..." --title "..."   (or pm_message on older templates)')
     # pm_message + sleep before an error exit: pm_show_error waits for the player instead of a fixed time
-    hits = []
+    # without the sleep the card closes as the script ends (pm_finish runs pm_message_end), so nobody sees it
+    hits, flash = [], []
     for i, (n, l) in enumerate(code):
         if not re.match(r"\s*pm_message\b", l):
             continue
         rest = [x.strip() for _, x in code[i + 1:i + 5] if x.strip()]
         if rest and rest[0].startswith("sleep") and any(re.match(r"exit\s+[1-9]", x) for x in rest[1:3]):
             hits.append(n)
+            continue
+        for x in rest:
+            if re.match(r"exit\s+[1-9]", x):
+                flash.append(n)
+                break
+            if re.match(r"(if|elif|else|then|fi|for|while|until|do|done|case|esac|sleep|read|pm_message|pm_show_error)\b|\$ESUDO\s+\S*portmsg|.*\|\|\s*exit", x):
+                break
+    if flash:
+        more = f" (also lines {', '.join(map(str, flash[1:]))})" if len(flash) > 1 else ""
+        yield Finding("sh.pm-message-error", WARN, f"Error message shown with pm_message right before exiting; the card closes with the script, so the player never reads it{more}.",
+                      file=f, line=flash[0], fix='pm_show_error "..." --title "..."   (waits until the player closes it)')
     if hits:
         more = f" (also lines {', '.join(map(str, hits[1:]))})" if len(hits) > 1 else ""
         yield Finding("sh.pm-message-error", INFO, f"Error message shown with pm_message and sleep; pm_show_error stays up until the player closes it{more}.",

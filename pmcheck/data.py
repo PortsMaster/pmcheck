@@ -1,5 +1,7 @@
 """Static lists the rules check against. Edit here, not in the rules."""
+import json
 import re
+from pathlib import Path
 
 # harbourmaster config.py HM_GENRES
 GENRES = {
@@ -64,7 +66,8 @@ RUNTIME_KEY = re.compile(
     r"\b((?:weston_pkg|mesa_pkg|frt|mono|python|renpy|zulu|jdk|jre|java|pyxel|solarus|godot|dotnet|rlvm)"
     r"[\w.\-]*?)(?:\.squashfs)?\b"
 )
-RUNTIME_ARCH_SUFFIX = re.compile(r"\.(aarch64|armhf|x86_64)(\.squashfs)?$")
+# Runtime catalog snapshot from PortMaster-New's ports.json; refresh with tools/update_runtimes.py
+RUNTIMES = json.loads((Path(__file__).parent / "runtimes.json").read_text())
 
 # Prebuilt PortMaster tools/loaders: shipping one doesn't mean the porter compiled anything.
 PREBUILT_RE = re.compile(r"^(gmloader(next|-next)?|box64|box86|love|frt_[\w.]+|westonwrap|gptokeyb2?|7zzs|xdelta3|innoextract|portmsg|mkxp-z|gamepad-picker)(\.(aarch64|armhf|x86_64))?$", re.I)
