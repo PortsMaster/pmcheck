@@ -405,6 +405,9 @@ def images(port):
         size = image_size(shot)
         if size and tuple(size) != (640, 480):
             yield Finding("images.screenshot-size", ERROR, f"screenshot is {size[0]}x{size[1]}, must be 640x480.", file=port.rel(shot))
+    if not (port.meta_file("cover.png") or port.meta_file("cover.jpg")):
+        yield Finding("images.no-cover", INFO, "No cover.png; the screenshot is used in its place.",
+                      fix=f"Make one with {data.COVER_GENERATOR}")
     for p in (p for d in port.meta_dirs() for p in d.iterdir()):
         if p.is_file() and re.match(r"^(screenshot|cover)(\..+)?\.(png|jpe?g)$", p.name, re.I):
             kb = p.stat().st_size
