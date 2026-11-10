@@ -76,12 +76,35 @@ GEMINI_API_KEY=<key from step 4>
 PMCHECK_GEMINI_MODEL=gemini-flash-latest
 MAX_DOWNLOAD_MB=1024
 CHECK_TIMEOUT=900
-GITHUB_TOKEN=
+GITHUB_TOKEN=<token from "GitHub token" below>
 ```
 - `gemini-flash-latest` follows Google's current Flash model, so retirements don't break it. To pin a model, list the ones your key can use:
   `curl -s -H "x-goog-api-key: $GEMINI_API_KEY" https://generativelanguage.googleapis.com/v1beta/models | grep '"name"'`
-- `GITHUB_TOKEN` is needed for PR links in practice. A check makes about 5 API calls plus one per file. With a token the files come from the GitHub API (5000 calls per hour). Without one, the API allows 60 calls per hour per server IP, and the files come from raw.githubusercontent.com, which answers HTTP 429 once an IP downloads too much. Create a fine-grained token at https://github.com/settings/personal-access-tokens with *Public repositories (read-only)* and no permissions.
+- `GITHUB_TOKEN` is needed for PR links in practice. A check makes about 5 API calls plus one per file. With a token the files come from the GitHub API (5000 calls per hour). Without one, the API allows 60 calls per hour per server IP, and the files come from raw.githubusercontent.com, which answers HTTP 429 once an IP downloads too much. Steps below.
 - The bot refuses to start when `ADMIN_ROLE_IDS` is empty.
+
+### GitHub token (for PR links)
+1. Open https://github.com/settings/personal-access-tokens. You can also get there from your avatar (top right) → **Settings** → **Developer settings** at the bottom of the left menu → **Personal access tokens** → **Fine-grained tokens**.
+2. Click **Generate new token**.
+3. Fill in the form:
+   - **Token name:** `pmcheck-bot`.
+   - **Expiration:** up to 1 year. Note the date: when it expires, PR checks fail with the rate-limit message again.
+   - **Resource owner:** your own account.
+   - **Repository access:** **Public repositories** (read-only access to public repos, all the bot needs).
+   - **Permissions:** leave everything as it is.
+4. Click **Generate token** and copy it. It starts with `github_pat_`, and GitHub shows it only once.
+5. Put it in `~/.config/pmcheck-bot.env` on the `GITHUB_TOKEN=` line, with no spaces or quotes:
+   ```
+   GITHUB_TOKEN=github_pat_xxxxxxxxxxxxxxxx
+   ```
+6. Check that GitHub accepts it (doesn't print the token):
+   ```bash
+   curl -s -H "Authorization: Bearer $(sed -n 's/^GITHUB_TOKEN=//p' ~/.config/pmcheck-bot.env)" https://api.github.com/rate_limit | grep -m1 '"limit"'
+   ```
+   `"limit": 5000` means it works. `"limit": 60` or `Bad credentials` means the line is wrong; fix it and check again.
+7. If the bot already runs as a service, restart it, since it reads the env file only at start: `systemctl --user restart pmcheck-bot`.
+
+To renew an expired token, open it on the same GitHub page, click **Regenerate token**, and do steps 5 to 7 again. The token stays in the env file on the server only; never put it in the repo.
 
 ## 8. First run in the foreground
 ```bash
