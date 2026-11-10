@@ -16,6 +16,8 @@ class KnownFalse(unittest.TestCase):
              "Provide a gptokeyb2 configuration ini file and reference it with '-c' instead of '-x'."),
             ("The rule checker reported F1 regarding armhf binaries, but the port intentionally supports both 32-bit (armhf) and 64-bit (aarch64) target routes.", ""),
             ("`$GPTOKEYB2 \"game\" -c` points to a missing .ini; controls will not work.", ""),
+            ("The launch script checks for love_11.5/love.txt and love.$DEVICE_ARCH to decide whether to use patcher.txt, but this is a .NET port, not a LÖVE port. These checks will always fail.",
+             "Remove the references to love_11.5 from the patcher conditional check on lines 54-55."),
         ]:
             self.assertTrue(known_false({"issue": issue, "fix": fix}), issue)
 

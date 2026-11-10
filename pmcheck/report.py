@@ -39,20 +39,12 @@ def markdown(name, findings, ai=None):
             out.append(f"_{ai}_")
         elif not ai:
             out.append("_No additional issues found._")
-        items = [a for a in (ai if isinstance(ai, list) else []) if a.get("kind") != "dispute"]
-        disputes = [a for a in (ai if isinstance(ai, list) else []) if a.get("kind") == "dispute"]
-        if not items and disputes:
-            out.append("_No additional issues found._")
+        items = ai if isinstance(ai, list) else []
         for a in items:
             loc = f" `{a.get('file', '')}{':' + str(a['line']) if a.get('line') else ''}`" if a.get("file") else ""
             out.append(f"- **{a.get('severity', 'note')}**{loc}: {a.get('issue', '')}")
             if a.get("fix"):
                 out.append(f"  - Fix: {a['fix']}")
-        if disputes:
-            out += ["", "**Rule findings the AI thinks are wrong** (check before acting on them):"]
-            for d in disputes:
-                loc = f" `{d['file']}{':' + str(d['line']) if d.get('line') else ''}`" if d.get("file") else ""
-                out.append(f"- **{d['rule']}**{loc}: {d['issue']}")
         out.append("")
     return "\n".join(out)
 
