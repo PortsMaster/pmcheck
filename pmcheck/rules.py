@@ -1,11 +1,13 @@
 """All checks. Each check takes a Port and yields Findings. Nothing here executes port code."""
 import json
+import os
 import re
 import shlex
 import shutil
 import struct
 import subprocess
 import tarfile
+import tempfile
 import xml.etree.ElementTree as ET
 from functools import lru_cache
 from pathlib import Path
@@ -145,6 +147,16 @@ def structure(port):
         if size > data.GIT_FILE_LIMIT:
             yield Finding("structure.file-too-big", ERROR, f"{port.rel(p)} is {size >> 20} MB; GitHub rejects files over 100 MB.",
                           file=port.rel(p), fix="Split into several .tar.gz archives along content boundaries.")
+    # leftovers from a test run on a device
+    log = port.gamedir / "log.txt"
+    if log.is_file() and log.stat().st_size > 0:
+        yield Finding("structure.leftover", WARN, f"{port.rel(log)} is a log from a test run; the script writes it on every launch.", file=port.rel(log), fix="Delete it.")
+    conf = port.gamedir / "conf"
+    if conf.is_dir():
+        saved = [p for p in conf.rglob("*") if p.is_file() and p.name != ".gitkeep"]
+        if len(saved) > 5:
+            yield Finding("structure.leftover", WARN, f"{port.rel(conf)}/ holds {len(saved)} files, likely saves and settings from a test run; players would start with them.",
+                          file=port.rel(conf), fix="Ship conf/ empty (a .gitkeep is fine) and let the game or script create its defaults.")
     count = len(port.logical_files())
     if count > data.LOOSE_FILE_LIMIT:
         biggest = _biggest_subdirs(port)
@@ -167,7 +179,7 @@ def _biggest_subdirs(port, n=3):
             rel = p.relative_to(port.gamedir)
         except ValueError:
             continue
-        if len(rel.parts) > 1 and not rel.parts[0].startswith(("libs.", "gl4es", "licen")) and rel.parts[0] not in ("libs", "lib"):
+        if len(rel.parts) > 1 and not rel.parts[0].startswith(("libs.", "gl4es", "licen")) and rel.parts[0] not in ("libs", "lib", "conf"):
             counts[rel.parts[0]] = counts.get(rel.parts[0], 0) + 1
     return [k for k, v in sorted(counts.items(), key=lambda kv: -kv[1]) if v > 10][:n]
 
@@ -383,6 +395,9 @@ def gameinfo(port):
             if img.lower() in {k.lower() for k in ok} or img.lower() == have.lower():
                 yield Finding("gameinfo.image", ERROR, f"<image> {img!r} has the wrong case; the folder is {gd!r} and device filesystems are case-sensitive.", file=f,
                               fix=f"<image>{have if have.lower() == img.lower() else img.replace(img.split('/')[1], gd, 1)}</image>")
+            elif re.fullmatch(r"\./[^/]+", img) and port.meta_file(img[2:]):
+                yield Finding("gameinfo.image", ERROR, f"<image> {img!r} lacks the game folder; PortMaster installs the image into {gd}/, so the frontend finds no image.", file=f,
+                              fix=f"<image>./{gd}/{img[2:]}</image>")
             else:
                 yield Finding("gameinfo.image", ERROR, f"<image> {img!r} points to a file that is not in the package.", file=f, fix=f"<image>{have}</image>")
         elif img not in ok:
@@ -570,7 +585,11 @@ def licences(port):
     lic = next((d for d in port.gamedir.iterdir() if d.is_dir() and d.name.lower() in ("licenses", "license", "licences", "licence")), None)
     pj = json_load(port)
     attr = (pj.get("attr") or {}) if isinstance(pj, dict) else {}
-    if attr.get("rtr") is True and not _game_licence(port, lic, attr):
+    if attr.get("rtr") is True and attr.get("availability") == "paid":
+        # rtr = everything ships with the port; paid = the player buys and copies in the game files
+        yield Finding("port.json.rtr", ERROR, 'rtr is true but availability is "paid": the player supplies the game files, so the port is not ready to run.',
+                      file=port.rel(json_load_path(port)) if json_load_path(port) else "", fix='"rtr": false')
+    elif attr.get("rtr") is True and not _game_licence(port, lic, attr):
         where = port.rel(lic) if lic else f"{port.gamedir.name}/licenses"
         yield Finding("licenses.game", ERROR, "Ready-to-run port with no licence for the game itself (only library licences found).",
                       file=port.rel(json_load_path(port)) if json_load_path(port) else "",
@@ -699,6 +718,8 @@ def _script(port, s):
         yield Finding("sh.pm_finish", WARN, "pm_finish is not called at the end.", file=f)
     shim_fwd = re.search(r"SDL3SHIM_SDL2_(VIDEO|AUDIO)DRIVER=", body)
     for n, l in grep(r"\bSDL_(VIDEO|AUDIO)DRIVER="):
+        if re.match(r"\s*(echo|printf)\b", l):
+            continue   # logging the value, not setting it
         if shim_fwd:
             continue   # sdl3-sdl2-backend pattern: the CFW's driver goes to SDL3SHIM_SDL2_*, the game gets sdl2
         sev = WARN if "sdl2" in l.lower() and "SDL3SHIM" in body else ERROR
@@ -829,16 +850,34 @@ def _script(port, s):
     if blocks:
         more = f" (also lines {', '.join(map(str, blocks[1:]))})" if len(blocks) > 1 else ""
         yield Finding("sh.comments", INFO, f"Multi-line comment block{'s' if len(blocks) > 1 else ''}; keep comments to one short line per fix{more}.", file=f, line=blocks[0])
-    if not shutil.which("shellcheck") and shutil.which("bash"):
-        # parse only (-n): nothing in the script runs
-        r = subprocess.run(["bash", "-n", str(s)], capture_output=True, text=True, timeout=30)
-        for m in re.finditer(r"line (\d+): (.+)", r.stderr):
-            yield Finding("sh.syntax", ERROR, f"bash: {m.group(2)}", file=f, line=int(m.group(1)))
-    if shutil.which("shellcheck"):
-        out = _run(["shellcheck", "-S", "error", "-f", "json", "-s", "bash", str(s)])
+    # CRLF is reported once by sh.crlf; parse a stripped copy so the real errors still show
+    src, tmpd = str(s), None
+    raw = s.read_bytes()
+    if b"\r" in raw:
+        tmpd = tempfile.mkdtemp(prefix="pmcheck-sc-")
+        src = os.path.join(tmpd, "script.sh")
+        Path(src).write_bytes(raw.replace(b"\r\n", b"\n"))
+    sc_out = None
+    try:
+        if not shutil.which("shellcheck") and shutil.which("bash"):
+            # parse only (-n): nothing in the script runs
+            r = subprocess.run(["bash", "-n", src], capture_output=True, text=True, timeout=30)
+            for m in re.finditer(r"line (\d+): (.+)", r.stderr):
+                yield Finding("sh.syntax", ERROR, f"bash: {m.group(2)}", file=f, line=int(m.group(1)))
+        if shutil.which("shellcheck"):
+            sc_out = _run(["shellcheck", "-S", "error", "-f", "json", "-s", "bash", src])
+    finally:
+        if tmpd:
+            shutil.rmtree(tmpd, ignore_errors=True)
+    if sc_out is not None:
+        out = sc_out
         try:
+            by_code = {}
             for item in json.loads(out or "[]"):
-                yield Finding("sh.shellcheck", ERROR, f"SC{item['code']}: {item['message']}", file=f, line=item.get("line", 0))
+                by_code.setdefault((item["code"], item["message"]), []).append(item.get("line", 0))
+            for (code, msg), ns in by_code.items():
+                more = f" (also lines {', '.join(map(str, ns[1:6]))}{', ...' if len(ns) > 6 else ''})" if len(ns) > 1 else ""
+                yield Finding("sh.shellcheck", ERROR, f"SC{code}: {msg}{more}", file=f, line=ns[0])
         except ValueError:
             pass
     if not re.search(r"gptokeyb", body, re.I):

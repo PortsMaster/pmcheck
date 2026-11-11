@@ -163,7 +163,8 @@ def load(path, pr=False):
         # mistake, not a wrapper folder: keep the zip root so the report says so.
         for s in sorted(inner.glob("*.sh")):
             m = GAMEDIR_RE.search(s.read_text(errors="replace"))
-            if m and m.group(1) == inner.name:
+            # ... unless the folder holds a game folder of that name too: a zipped PR folder (ports/<name>/)
+            if m and m.group(1) == inner.name and not (inner / m.group(1)).is_dir():
                 inner_scripts.append(s)
         if not inner_scripts:
             root = inner

@@ -420,6 +420,26 @@ class BadPorts(unittest.TestCase):
     def test_crlf(self):
         self.check("sh.crlf", sh=GOOD_SH.replace("\n", "\r\n"))
 
+    def test_crlf_reported_once(self):
+        # the script is parsed without the CRs: no per-line shellcheck/bash noise on top of sh.crlf
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace("\n", "\r\n"))
+            r = rules_of(t, "ERROR")
+            self.assertIn("sh.crlf", r)
+            self.assertFalse({"sh.shellcheck", "sh.syntax"} & r, r)
+
+    def test_wrapped_pr_folder(self):
+        # a zipped PR folder: <name>/{Port.sh, port.json, ..., <name>/}
+        with tempfile.TemporaryDirectory() as t:
+            inner = Path(t) / "testgame"
+            make_port(inner)
+            for n in ("port.json", "README.md", "gameinfo.xml", "screenshot.png", "cover.png"):
+                (inner / "testgame" / n).rename(inner / n)
+            r = rules_of(t)
+            self.assertNotIn("structure.script-in-gamedir", r)
+            self.assertNotIn("licenses.missing", r)
+            self.assertFalse({"structure.no-gamedir", "files.missing"} & r, r)
+
     def test_tar_z(self):
         self.check("sh.tar-z", sh=GOOD_SH.replace("pm_finish", 'tar -xzf "data.tar.gz"\npm_finish'))
 
