@@ -745,9 +745,15 @@ def _script(port, s):
     if re.search(r"libgl_default\.txt", body) and not re.search(r"libgl_\$\{?CFW_NAME\}?\.txt", body):
         n = grep(r"libgl_default\.txt")[0][0]
         yield Finding("sh.libgl", ERROR, "Source libgl_${CFW_NAME}.txt with a libgl_default.txt fallback, never libgl_default.txt alone.", file=f, line=n)
-    if re.search(r"export\s+SDL_VIDEO_(GL|EGL)_DRIVER", body) and '":$LD_LIBRARY_PATH:"' not in body:
+    # every libgl_*.txt sets LIBGL_ES in exactly the branch that puts gl4es on LD_LIBRARY_PATH, so either guard works
+    gl_guard = '":$LD_LIBRARY_PATH:"' in body or re.search(r"(\[\[?|test)\s+(-n\s+|!\s+-z\s+)?\"?\$\{?LIBGL_ES\}?\"?", body)
+    if re.search(r"export\s+SDL_VIDEO_(GL|EGL)_DRIVER", body) and not gl_guard:
         n = grep(r"SDL_VIDEO_(GL|EGL)_DRIVER")[0][0]
-        yield Finding("sh.gl-driver", WARN, "SDL_VIDEO_GL/EGL_DRIVER export should be guarded on gl4es being in LD_LIBRARY_PATH.", file=f, line=n)
+        yield Finding("sh.gl-driver", WARN, "SDL_VIDEO_GL/EGL_DRIVER is exported even when the CFW's libgl script skipped gl4es (a device with native GL, e.g. ROCKNIX on some GPUs); gl4es then gets forced in anyway.",
+                      file=f, line=n, fix="Export them only when gl4es is in use, after sourcing libgl_${CFW_NAME}.txt:",
+                      snippet='if [[ ":$LD_LIBRARY_PATH:" == *":$GAMEDIR/gl4es.${DEVICE_ARCH}:"* ]]; then\n'
+                              '  export SDL_VIDEO_GL_DRIVER="$GAMEDIR/gl4es.${DEVICE_ARCH}/libGL.so.1"\n'
+                              '  export SDL_VIDEO_EGL_DRIVER="$GAMEDIR/gl4es.${DEVICE_ARCH}/libEGL.so.1"\nfi')
     for n, l in grep(r"\btar\s+-?[a-zA-Z]*z[a-zA-Z]*f?\b|\btar\b.*\s-z\b"):
         if re.search(r"\btar\s+(c|-c)", l):
             continue

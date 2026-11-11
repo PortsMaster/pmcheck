@@ -76,7 +76,13 @@ def check_ini(text, f, scripts=""):
             yield Finding("ini.mouse-config", WARN, "Stick mouse without the standard [config] block (missing " + ", ".join(missing) + "); the cursor drifts.",
                           file=f, snippet="[config]\nmouse_delay = 16\ndeadzone_mode = scaled_radial\ndeadzone_scale = 6\ndeadzone_x = 2000\ndeadzone_y = 2000")
         if "DISPLAY_WIDTH" not in scripts or "deadzone_scale" not in scripts:
-            yield Finding("ini.mouse-hires", INFO, "No high-res mouse-speed bump in the launch script (sed deadzone_scale when DISPLAY_WIDTH > 1280).", file=f)
+            base = config.get("deadzone_scale", "6")
+            fast = int(base) * 3 if str(base).isdigit() else 18
+            name = f.rsplit("/", 1)[-1]
+            yield Finding("ini.mouse-hires", INFO, "The cursor moves the same number of pixels on every screen, so on 1080p devices (RP5, Odin 2 and similar) "
+                          "it crosses the screen about three times slower than on 640x480 and feels sluggish. A speed bump for wide screens in the launch script fixes that.",
+                          file=f, fix="Before the $GPTOKEYB2 line:",
+                          snippet=f'if [ "${{DISPLAY_WIDTH:-640}}" -gt 1280 ]; then\n  sed -i "s/^deadzone_scale = .*/deadzone_scale = {fast}/" "$GAMEDIR/{name}"\nfi')
     if stick_keys and not ({"deadzone_x", "deadzone_y"} <= set(config) or "deadzone" in config):
         yield Finding("ini.deadzone", INFO, "A stick sends keys but [config] has no deadzone_x/deadzone_y; a resting stick holds arrow keys.", file=f,
                       snippet="[config]\ndeadzone_x = 10000\ndeadzone_y = 10000")
