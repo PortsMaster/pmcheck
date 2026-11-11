@@ -625,6 +625,42 @@ def binaries(port):
             yield Finding("runtime.bundled", WARN, f"{rel}: bundled Mono/.NET. PortMaster provides runtime squashfs files.", file=rel)
 
 
+@lru_cache(maxsize=None)
+def strip_savings(path):
+    """Bytes strip would remove (debug sections + symbol table), and whether there is debug info."""
+    out = _run(["readelf", "-S", "-W", str(path)])
+    total, debug = 0, False
+    for m in re.finditer(r"\]\s+(\S+)\s+\S+\s+[0-9a-f]+\s+[0-9a-f]+\s+([0-9a-f]+)", out):
+        name, size = m.group(1), int(m.group(2), 16)
+        if name.startswith((".debug_", ".zdebug_")):
+            total += size
+            debug = True
+        elif name in (".symtab", ".strtab"):
+            total += size
+    return total, debug
+
+
+@check
+def debug_symbols(port):
+    debug, syms = [], []
+    for p, info in elves(port):
+        if data.PREBUILT_RE.match(p.name) or re.search(r"(^|/)(jre|jdk)[^/]*/", port.rel(p)):
+            continue
+        saved, has_debug = strip_savings(p)
+        if saved >= 512 * 1024:
+            (debug if has_debug else syms).append((p, saved))
+    mb = lambda b: f"{b / 1048576:.1f} MB"
+    for hits, sev, what in ((debug, WARN, "debug info"), (syms, INFO, "symbol tables (not stripped)")):
+        if not hits:
+            continue
+        hits.sort(key=lambda h: -h[1])
+        total = sum(s for _, s in hits)
+        before = sum(p.stat().st_size for p, _ in hits)
+        shown = ", ".join(f"{port.rel(p)} ({mb(s)})" for p, s in hits[:6]) + (f" and {len(hits) - 6} more" if len(hits) > 6 else "")
+        yield Finding("bin.debug", sev, f"Binaries ship with {what}; strip would save {mb(total)} of {mb(before)}: {shown}.",
+                      file=port.rel(hits[0][0]), fix="strip <file> (or link with -s) before packaging.")
+
+
 # ---------------------------------------------------------------- archives
 @check
 def archives(port):
@@ -792,6 +828,44 @@ def _script(port, s):
             yield Finding(rid, WARN, msg, file=f)
     if not re.search(r"^\s*pm_finish\b", body, re.M):
         yield Finding("sh.pm_finish", WARN, "pm_finish is not called at the end.", file=f)
+    if not re.search(r"^\s*(export\s+)?GAMEDIR=", body, re.M):
+        yield Finding("sh.gamedir", WARN, "GAMEDIR is not set; the template uses GAMEDIR for the game folder.", file=f,
+                      fix=f"GAMEDIR=/$directory/ports/{port.gamedir.name if port.gamedir else '<gamedir>'}")
+    if not re.search(r"\bpm_platform_helper\b", body):
+        yield Finding("sh.platform-helper", WARN, "pm_platform_helper is not called before the game starts.", file=f,
+                      fix='pm_platform_helper "$GAMEDIR/$BINARY"')
+    for n, l in grep(r"^\s*(source|\.)\s+\"?\$\{?controlfolder\}?/device_info\.txt"):
+        yield Finding("sh.device-info", WARN, "control.txt already sources device_info.txt.", file=f, line=n, fix="Delete the line.")
+    for n, l in grep(r"chmod\s+\S+\s+/dev/uinput"):
+        yield Finding("sh.uinput", WARN, "control.txt already makes /dev/uinput writable.", file=f, line=n, fix="Delete the line.")
+    # Classic vs gptokeyb2 is the porter's choice; only blank .gptk bindings are a reason to switch
+    # (blank values don't unbind in classic gptokeyb, its compiled-in default keys stay live).
+    cd_gd = re.search(r"^\s*cd\s+\"?\$\{?GAMEDIR\}?/?\"?\s*(;|&&|$)", body, re.M) or (port.gamedir is not None and port.gamedir.name in body)
+    for n, l in grep(r"^\s*\$\{?GPTOKEYB\}?\"?\s.*\s-c\s"):
+        m = re.search(r"\s-c\s+(\"[^\"]+\"|'[^']+'|\S+)", l)
+        arg = m.group(1).strip("\"'")
+        target = _resolve(port, arg) if "$" in arg else (port.gamedir / arg if cd_gd and port.gamedir is not None else None)
+        if target is None or not target.is_file():
+            continue
+        entries = [x.strip() for x in port.read_text(target).splitlines() if x.strip() and not x.strip().startswith("#")]
+        blank = [x for x in entries if re.fullmatch(r"\S+\s*=\s*", x)]
+        if blank or not entries:
+            what = f"{len(blank)} blank binding{'s' if len(blank) != 1 else ''}" if blank else "no bindings"
+            yield Finding("sh.gptokeyb-classic", WARN, f"Classic gptokeyb with {port.rel(target)}, which has {what}. Blank values don't unbind: classic gptokeyb's compiled-in default keys stay active (double input).",
+                          file=f, line=n, fix=f'Use gptokeyb2: $GPTOKEYB2 "<binary>" & with no -c for the kill switch alone, or an .ini that maps only what is needed.')
+    # Old end-of-script cleanup that pm_finish does itself (gptokeyb kills are sh.kill-gptokeyb)
+    tail_rx = re.compile(r"\s*($|fi\b|\}|exit\b|pm_finish\b|unset\s|printf\s|if\s+command\s+-v\s+systemctl|.*\boga_events\b|.*\b(kill|pkill|killall)\b.*gptokeyb)")
+    tail_from = len(code)
+    while tail_from > 0 and tail_rx.match(code[tail_from - 1][1]):
+        tail_from -= 1
+    old = [n for n, l in code if re.search(r"\boga_events\b", l)]
+    old += [n for n, l in code[tail_from:] if re.match(r"\s*unset\s+SDL_GAMECONTROLLERCONFIG\b", l)
+            or (re.match(r"\s*printf\s+[\"']\\033c", l) and not re.search(r"^\s*pm_finish\b", body, re.M))]
+    if old:
+        old = sorted(set(old))
+        more = f" (also lines {', '.join(map(str, old[1:]))})" if len(old) > 1 else ""
+        yield Finding("sh.old-cleanup", WARN, f"Old end-of-script cleanup (unset SDL_GAMECONTROLLERCONFIG / oga_events restart / printf \\033c){more}.",
+                      file=f, line=old[0], fix="Delete it; pm_finish does this.")
     shim_fwd = re.search(r"SDL3SHIM_SDL2_(VIDEO|AUDIO)DRIVER=", body)
     for n, l in grep(r"\bSDL_(VIDEO|AUDIO)DRIVER="):
         if re.match(r"\s*(echo|printf)\b", l):
@@ -953,6 +1027,10 @@ def _script(port, s):
     for n, l in grep(r"^\s*exec\s*>\s*\"?\$\{?GAMEDIR\}?/log\.txt\"?\s*2>&1\s*$"):
         yield Finding("sh.log-old", WARN, "Old logging line.", file=f, line=n,
                       fix='> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1')
+    for n, l in grep(r"^\s*exec\s*>\s*>\(\s*tee\b"):
+        if not re.search(r"\$\{?GAMEDIR\}?/log\.txt", l):
+            yield Finding("sh.log-old", WARN, "Old logging line (log path not $GAMEDIR/log.txt).", file=f, line=n,
+                          fix='> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1')
     # -c pointing at a control file the package doesn't have: gptokeyb then maps nothing
     cd_gamedir = re.search(r"^\s*cd\s+\"?\$\{?GAMEDIR\}?/?\"?\s*(;|&&|$)", body, re.M)
     for n, l in code:
