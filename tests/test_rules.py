@@ -587,7 +587,7 @@ class Mcrust(unittest.TestCase):
     def test_review_findings(self):
         got = rules_of(os.environ["PMCHECK_MCRUST"])
         for r in ("port.json.min_glibc", "port.json.porter", "images.size",
-                  "structure.too-many-files", "runtime.bundled", "licenses.component", "sh.xdg"):
+                  "structure.too-many-files", "runtime.bundled", "licenses.component"):
             self.assertIn(r, got)
 
 

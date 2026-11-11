@@ -458,7 +458,11 @@ def readme(port):
         return
     text = port.read_text(p)
     heads = {h.strip().lower() for h in re.findall(r"^#{1,3}\s*(.+?)\s*#*$", text, re.M)}
-    need = ["notes", "controls"]
+    # the guide asks for a thank-you to the creator; "## Notes" is only its usual place
+    if not any(x.startswith("notes") for x in heads) and not re.search(r"\bthank|\bcredits?\b", text, re.I):
+        yield Finding("readme.thanks", WARN, "README has no thank-you to the game's creator (usually a '## Notes' section at the top).", file=port.rel(p),
+                      fix="## Notes\n\nThanks to <creator> for creating <game>!")
+    need = ["controls"]
     if any(not data.PREBUILT_RE.match(p.name) and p.parent == port.gamedir for p, _ in elves(port)):
         need.append("compile")
     for h in need:
@@ -758,14 +762,6 @@ def _script(port, s):
     if hits:
         more = f" (also lines {', '.join(str(n) for n, _ in hits[1:])})" if len(hits) > 1 else ""
         yield Finding("sh.home", ERROR, f"Don't redirect HOME/XDG_CONFIG_HOME (PulseAudio symlink fails on FAT); use bind_directories{more}.", file=f, line=hits[0][0])
-    for n, l in grep(r"XDG_DATA_HOME=|XDG_CACHE_HOME="):
-        if BOILER.match(l.strip()) and "${XDG_DATA_HOME:-" in l:
-            continue
-        if re.search(r"XDG_(DATA|CACHE)_HOME=\"?(\$HOME|\$\{HOME\}|~)/\.(local/share|cache)\"?\s*$", l):
-            continue   # just the default location
-        if not re.match(r"\s*(export\s+)?XDG_(DATA|CACHE)_HOME=\S*\s*$", l):
-            continue   # a prefix on one command (Godot/westonwrap template), not the whole script
-        yield Finding("sh.xdg", INFO, "Redirecting a whole XDG root; prefer bind_directories for the game's own folder.", file=f, line=n)
     for n, l in grep(r"^\s*bind_(directories|files)\s"):
         try:
             args = shlex.split(l.split("#")[0] if " #" in l else l)
@@ -807,33 +803,6 @@ def _script(port, s):
                 and not any(re.search(r"\bpm_(message|show_error)\b", x) for x in near)):
             yield Finding("sh.echo-message", WARN, "This message goes to the log, the player never sees it before the exit.", file=f, line=n,
                           fix='pm_show_error "..." --title "..."   (or pm_message on older templates)')
-    # pm_message + sleep before an error exit: pm_show_error waits for the player instead of a fixed time
-    # without the sleep the card closes as the script ends (pm_finish runs pm_message_end), so nobody sees it
-    hits, flash = [], []
-    for i, (n, l) in enumerate(code):
-        if not re.match(r"\s*pm_message\b", l):
-            continue
-        # the template's "no harbourmaster" branch only runs on pre-2023 PortMaster, which has no pm_show_error
-        if any("harbourmaster" in x for _, x in code[max(0, i - 2):i]):
-            continue
-        rest = [x.strip() for _, x in code[i + 1:i + 5] if x.strip()]
-        if rest and rest[0].startswith("sleep") and any(re.match(r"exit\s+[1-9]", x) for x in rest[1:3]):
-            hits.append(n)
-            continue
-        for x in rest:
-            if re.match(r"exit\s+[1-9]", x):
-                flash.append(n)
-                break
-            if re.match(r"(if|elif|else|then|fi|for|while|until|do|done|case|esac|sleep|read|pm_message|pm_show_error)\b|\$ESUDO\s+\S*portmsg|.*\|\|\s*exit", x):
-                break
-    if flash:
-        more = f" (also lines {', '.join(map(str, flash[1:]))})" if len(flash) > 1 else ""
-        yield Finding("sh.pm-message-error", WARN, f"Error message shown with pm_message right before exiting; the card closes with the script, so the player never reads it{more}.",
-                      file=f, line=flash[0], fix='pm_show_error "..." --title "..."   (waits until the player closes it)')
-    if hits:
-        more = f" (also lines {', '.join(map(str, hits[1:]))})" if len(hits) > 1 else ""
-        yield Finding("sh.pm-message-error", INFO, f"Error message shown with pm_message and sleep; pm_show_error stays up until the player closes it{more}.",
-                      file=f, line=hits[0], fix='pm_show_error "..." --title "..."   (drop the sleep)')
     for n, l in grep(r"^\s*(echo|printf)\b.*>\s*\"?(\$\{?CUR_TTY\}?|/dev/tty\d*)\"?"):
         if re.search(r"\\033c|\\e\[|\\033\[", l):
             continue   # clearing the console
