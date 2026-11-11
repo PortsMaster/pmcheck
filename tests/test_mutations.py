@@ -239,6 +239,7 @@ VALID = [
     ("runtime without suffix", lambda r: pj(r, runtime=["weston_pkg_0.2"])),
     ("catalog key with arch in it", lambda r: pj(r, runtime=["mono-6.12.0.122-aarch64.squashfs"])),
     ("pm_message before a branch that exits", insert('pm_message "Preparing data"\nif ! true; then\n  pm_show_error "Failed" --title "Error"\n  exit 1\nfi\n')),
+    ("template harbourmaster check", insert('if [ ! -f "$controlfolder/harbourmaster" ]; then\n  pm_message "This port requires the latest PortMaster to run, please go to https://portmaster.games/ for more info."\n  sleep 5\n  exit 1\nfi\n')),
     ("SDL driver only logged", insert('echo "SDL_VIDEODRIVER=$SDL_VIDEODRIVER"\n')),
     ("empty log and conf placeholder", both(write("testgame/log.txt", ""), write("testgame/conf/.gitkeep", ""))),
     ("gptokeyb2 exclusive directive", lambda r: ini(r, "[controls]\noverlay = clear\nexclusive = false\n")),

@@ -420,6 +420,13 @@ class BadPorts(unittest.TestCase):
     def test_crlf(self):
         self.check("sh.crlf", sh=GOOD_SH.replace("\n", "\r\n"))
 
+    def test_harbourmaster_template_message(self):
+        block = ('if [ ! -f "$controlfolder/harbourmaster" ]; then\n  pm_message "This port requires the latest PortMaster to run."\n'
+                 '  sleep 5\n  exit 1\nfi\n')
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace("pm_finish", block + "pm_finish"))
+            self.assertNotIn("sh.pm-message-error", rules_of(t))
+
     def test_crlf_reported_once(self):
         # the script is parsed without the CRs: no per-line shellcheck/bash noise on top of sh.crlf
         with tempfile.TemporaryDirectory() as t:

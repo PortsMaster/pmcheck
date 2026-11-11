@@ -349,8 +349,16 @@ def port_json(port):
             if key and data.RUNTIME_KEY.fullmatch(key) and "$" not in key:
                 used.add(key)
     listed = {r[:-9] if r.endswith(".squashfs") else r for r in runtimes}
-    for u in sorted(used - listed):
-        yield Finding("port.json.runtime", WARN, f"Script uses runtime {u!r} but port.json runtime does not list it.", file=f)
+    missing = sorted(used - listed)
+    if missing:
+        # keep the entries as written, add the missing ones in the same spelling (with or without .squashfs)
+        suffix = ".squashfs" if not runtimes or any(r.endswith(".squashfs") for r in runtimes) else ""
+        full = list(runtimes) + [m + suffix for m in missing]
+        names = " and ".join(repr(m) for m in missing)
+        yield Finding("port.json.runtime", WARN,
+                      f"The script mounts the runtime{'s' if len(missing) > 1 else ''} {names}, but the \"runtime\" list in port.json does not include {'them' if len(missing) > 1 else 'it'}. "
+                      "PortMaster downloads only the listed runtimes when it installs the port; anything else the script has to fetch on first launch, which fails without internet.",
+                      file=f, fix=f'Set it in port.json: "runtime": {json.dumps(full)}')
 
 
 # ---------------------------------------------------------------- gameinfo.xml
@@ -804,6 +812,9 @@ def _script(port, s):
     hits, flash = [], []
     for i, (n, l) in enumerate(code):
         if not re.match(r"\s*pm_message\b", l):
+            continue
+        # the template's "no harbourmaster" branch only runs on pre-2023 PortMaster, which has no pm_show_error
+        if any("harbourmaster" in x for _, x in code[max(0, i - 2):i]):
             continue
         rest = [x.strip() for _, x in code[i + 1:i + 5] if x.strip()]
         if rest and rest[0].startswith("sleep") and any(re.match(r"exit\s+[1-9]", x) for x in rest[1:3]):
