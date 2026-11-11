@@ -469,6 +469,27 @@ class BadPorts(unittest.TestCase):
             self.assertIn("sh.crlf", r)
             self.assertFalse({"sh.shellcheck", "sh.syntax"} & r, r)
 
+    def test_wrapper_folder_in_zip(self):
+        # autoinstall extracts as-is: a wrapping folder puts the .sh one level too deep
+        import zipfile
+        with tempfile.TemporaryDirectory() as t:
+            src = Path(t) / "src"
+            make_port(src)
+            for wrapped in (True, False):
+                z = Path(t) / f"port{wrapped}.zip"
+                with zipfile.ZipFile(z, "w") as zf:
+                    for f in src.rglob("*"):
+                        rel = f.relative_to(src)
+                        zf.write(f, f"testgame/{rel}" if wrapped else str(rel))
+                r = rules_of(z, "ERROR")
+                self.assertEqual("structure.wrapper" in r, wrapped, r)
+
+    def test_duplicate_meta(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            shutil.copy(Path(t) / "testgame" / "README.md", Path(t) / "README.md")
+            self.assertIn("structure.duplicate-meta", rules_of(t, "WARN"))
+
     def test_wrapped_pr_folder(self):
         # a zipped PR folder: <name>/{Port.sh, port.json, ..., <name>/}
         with tempfile.TemporaryDirectory() as t:

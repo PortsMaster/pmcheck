@@ -115,6 +115,11 @@ def structure(port):
     for s in port.inner_scripts:
         yield Finding("structure.script-in-gamedir", ERROR, f"{port.rel(s)} is inside the game folder; the launch script must sit next to it, at the top level.",
                       file=port.rel(s), fix=f"Move {s.name} up one level, out of {s.parent.name}/.")
+    if port.wrapper:
+        # harbourmaster extracts zip paths as they are into ports/ and only takes top-level *.sh as launch scripts
+        yield Finding("structure.wrapper", ERROR, f"Everything in the zip is inside an extra {port.wrapper}/ folder. PortMaster installs the zip as it is, "
+                      f"so the launch script lands in ports/{port.wrapper}/ instead of ports/ and the game folder one level too deep; the port won't start.",
+                      fix=f"Zip the contents of {port.wrapper}/, not the folder: the zip's top level holds the .sh and the game folder.")
     if not port.scripts:
         yield Finding("structure.no-script", ERROR, "No launch script (.sh) at the top level.")
     if port.gamedir is None:
@@ -147,6 +152,13 @@ def structure(port):
         if size > data.GIT_FILE_LIMIT:
             yield Finding("structure.file-too-big", ERROR, f"{port.rel(p)} is {size >> 20} MB; GitHub rejects files over 100 MB.",
                           file=port.rel(p), fix="Split into several .tar.gz archives along content boundaries.")
+    # metadata shipped twice: next to the .sh and again in the game folder (only one copy is used)
+    if port.root != port.gamedir:
+        dups = sorted(f.name for f in port.top_files if f.name.lower() in data.META_FILES and (port.gamedir / f.name).is_file()
+                      and (port.gamedir / f.name).read_bytes() == f.read_bytes())   # same file, not e.g. the engine's own README
+        if dups:
+            yield Finding("structure.duplicate-meta", WARN, f"{', '.join(dups)} {'is' if len(dups) == 1 else 'are'} both next to the .sh and in {port.gamedir.name}/; keep one copy.",
+                          fix=f"Delete the copies in {port.gamedir.name}/ (PR layout keeps them next to the .sh).")
     # leftovers from a test run on a device
     log = port.gamedir / "log.txt"
     if log.is_file() and log.stat().st_size > 0:
@@ -465,8 +477,16 @@ def readme(port):
     need = ["controls"]
     if any(not data.PREBUILT_RE.match(p.name) and p.parent == port.gamedir for p, _ in elves(port)):
         need.append("compile")
+    shipped = {f.name for f in port.files()}
+    # patches only: other archive names in a README are usually game files the player brings, or the port zip
+    names = re.findall(r"`([\w.+-]+\.(?:patch|diff|tar\.gz|tgz|tar\.xz|zip))`", text)
+    missing = sorted({m for m in names if m not in shipped and (re.search(r"\.(patch|diff)$", m) or re.search(r"patch", m, re.I))})
+    if missing:
+        yield Finding("readme.missing-file", WARN, f"The README refers to {', '.join(missing)}, which the package does not contain; nobody can repeat the build without it.",
+                      file=port.rel(p), fix=f"Ship it (patches go in {port.gamedir.name if port.gamedir else '<gamedir>'}/patches/) or link where to get it.")
     for h in need:
-        if not any(x.startswith(h) for x in heads):
+        alt = ("compile", "build", "building") if h == "compile" else (h,)
+        if not any(x.startswith(alt) for x in heads):
             yield Finding("readme.section", WARN if h != "compile" else INFO, f"README has no '## {h.title()}' section.", file=port.rel(p))
 
 
@@ -809,9 +829,19 @@ def _script(port, s):
         yield Finding("sh.tar-owner", WARN, f"Extract with tar --no-same-owner{more}.", file=f, line=tars[0],
                       fix='gunzip -c "$ARCHIVE_FILE" | tar --no-same-owner -xf -')
     hits = grep(r"(^|\s|export\s+)HOME=|(^|\s|export\s+)XDG_CONFIG_HOME=")
+    # an "else" fallback after testing for bind_directories only runs on PortMaster before 2024-08 (funcs.txt without it)
+    def _fallback(n):
+        i = next(k for k, (m, _) in enumerate(code) if m == n)
+        before = [x for _, x in code[max(0, i - 4):i]]
+        return any(re.search(r"(type|command\s+-v|declare\s+-F)\s+bind_directories", x) for x in before) and any(re.match(r"\s*else\b", x) for x in before)
+    fb = [(n, l) for n, l in hits if _fallback(n)]
+    hits = [(n, l) for n, l in hits if not _fallback(n)]
     if hits:
         more = f" (also lines {', '.join(str(n) for n, _ in hits[1:])})" if len(hits) > 1 else ""
         yield Finding("sh.home", ERROR, f"Don't redirect HOME/XDG_CONFIG_HOME (PulseAudio symlink fails on FAT); use bind_directories{more}.", file=f, line=hits[0][0])
+    if fb:
+        yield Finding("sh.home", INFO, "HOME/XDG_CONFIG_HOME redirect as a fallback for a PortMaster without bind_directories. Every PortMaster since 2024-08 has it, so the fallback never runs and can go.",
+                      file=f, line=fb[0][0], fix="Call bind_directories directly and drop the if/else.")
     for n, l in grep(r"^\s*bind_(directories|files)\s"):
         try:
             args = shlex.split(l.split("#")[0] if " #" in l else l)

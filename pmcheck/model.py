@@ -31,6 +31,7 @@ class Port:
     symlinks: list = field(default_factory=list)
     zip_issues: list = field(default_factory=list)
     inner_scripts: list = field(default_factory=list)   # .sh files wrongly placed inside the game folder
+    wrapper: str = ""        # name of an extra folder the zip wraps everything in (autoinstall breaks)
     pr: bool = False         # strict PR layout (GitHub check); False = testing zip, either layout is fine
     _tmp: object = None
 
@@ -170,6 +171,8 @@ def load(path, pr=False):
             root = inner
 
     port = Port(root=root, layout="zip", pr=pr, _tmp=tmp)
+    if tmp is not None and root != tmp:
+        port.wrapper = root.name   # only a zip can be wrapped; a folder argument is the port itself
     port.symlinks = list(symlinks)
     for p in sorted(root.iterdir()):
         if p.name in JUNK:
