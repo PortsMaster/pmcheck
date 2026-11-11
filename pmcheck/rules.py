@@ -539,6 +539,18 @@ def binaries(port):
         provided.append(re.compile(r"^lib(X\w*|xcb\S*|GLU|xkbcommon\S*|wayland-\S+)\.so"))
     if re.search(r"qt6", rts, re.I):
         provided.append(re.compile(r"^libQt6\w+\.so"))
+    # bundled libraries nothing in the port links. Only when the port ships its own native executable:
+    # without one the game runs in a runtime or loader (Mono, Godot, gmloader ...) that dlopens libraries by name.
+    linked = {n for _, info in elves(port) for n in info["needed"]}
+    unlinked = set()
+    has_exe = any(not data.PREBUILT_RE.match(p.name) and ".so" not in p.name and (info["type"] == "EXEC" or (info["type"] == "DYN" and not info["static"] and not info["soname"]))
+                  for p, info in elves(port))
+    if has_exe and not re.search(r"mono|dotnet|box64|box86|gmloader", scripts_all, re.I):
+        for p in set(bundled.values()):
+            so = elf_info(p)["soname"]
+            if (p.name not in linked and so not in linked and p.name not in scripts_all and (not so or so not in scripts_all)
+                    and not _in_gl4es(p) and not re.search(r"(^|/)(jre|jdk)[^/]*/", port.rel(p))):
+                unlinked.add(p)
     needers = {}
     for p, info in elves(port):
         rel = port.rel(p)
@@ -546,10 +558,17 @@ def binaries(port):
             continue   # a bundled JRE's optional AWT/sound libs load lazily
         for n in info["needed"]:
             if n not in bundled and not any(rx.match(n) for rx in provided):
-                needers.setdefault(n, rel)
+                # name a linked needer when there is one
+                if n not in needers or (needers[n] in {port.rel(u) for u in unlinked} and p not in unlinked):
+                    needers[n] = rel
     if needers:
         libs = sorted(needers)
-        shown = ", ".join(f"{n} ({needers[n]})" for n in libs[:8]) + (f" and {len(libs) - 8} more" if len(libs) > 8 else "")
+        rel_unlinked = {port.rel(p) for p in unlinked}
+        def who(n):
+            r = needers[n]
+            # the needer itself is linked by nothing: it only loads if the game dlopens it
+            return f"{r}, which nothing in the port links, so it only matters if the game loads it at runtime" if r in rel_unlinked else r
+        shown = ", ".join(f"{n} ({who(n)})" for n in libs[:8]) + (f" and {len(libs) - 8} more" if len(libs) > 8 else "")
         yield Finding("bin.needed", INFO, f"{len(libs)} needed librar{'y' if len(libs) == 1 else 'ies'} not bundled and not on the known CFW list: {shown}.",
                       fix="Check on device; bundle a library only if a device reports it missing.")
     # Bundled language runtimes where PortMaster ships a squashfs

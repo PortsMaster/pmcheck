@@ -337,6 +337,23 @@ class ScriptNoise(unittest.TestCase):
 
 
 class SDL3(unittest.TestCase):
+    def test_needed_by_unlinked_lib(self):
+        # libbar.so.1 NEEDs libcairo.so.2, but the game binary does not link libbar
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            libs = Path(t) / "testgame" / "libs.aarch64"
+            libs.mkdir()
+            shutil.copy(FIX / "libbar.so.1", libs / "libbar.so.1")
+            (Path(t) / "testgame" / "licenses" / "LICENSE.bar").write_text("MIT")
+            port = load(t)
+            try:
+                f = [x for x in run_all(port) if x.rule == "bin.needed"]
+            finally:
+                port.cleanup()
+            self.assertEqual(len(f), 1)
+            self.assertIn("libcairo.so.2", f[0].message)
+            self.assertIn("only matters if the game loads it at runtime", f[0].message)
+
     def test_upstream_sdl3_is_error(self):
         with tempfile.TemporaryDirectory() as t:
             make_port(t)
