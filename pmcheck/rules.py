@@ -493,6 +493,20 @@ def _named_elsewhere(port, p):
     return any(want in names for q, names in port._so_names.items() if q != p)
 
 
+def _sdl3_gpu_use(port):
+    """'compute' / 'gpu' when a native binary imports SDL3's GPU API (with / without compute pipelines), else ''."""
+    use = ""
+    for p, info in elves(port):
+        if info["type"] == "DYN" and ".so" in p.name:
+            continue
+        syms = _run(["nm", "-D", "--undefined-only", str(p)])
+        if "SDL_CreateGPUComputePipeline" in syms:
+            return "compute"
+        if re.search(r"\bSDL_CreateGPUDevice", syms):
+            use = "gpu"
+    return use
+
+
 @check
 def binaries(port):
     scripts_all = "\n".join(script_text(port, s) for s in port.scripts)
@@ -513,8 +527,19 @@ def binaries(port):
             if rx.match(name):
                 yield Finding("libs.banned", ERROR, f"{rel} must not be bundled: {why}.", file=rel, fix="Delete it.")
         if name.startswith("libSDL3.so") and b"SDL3SHIM_" not in p.read_bytes():
-            yield Finding("libs.sdl3", ERROR, f"{rel} is upstream SDL3. SDL3 games ship the sdl3-sdl2-backend shim, which hands video, audio and input to the CFW's SDL2 (fbdev, rotation, KMSDRM quirks).", file=rel,
-                          fix="Build against https://github.com/bmdhacks/SDL/tree/sdl2-backend and ship its libSDL3.so.0 instead.")
+            msg = f"{rel} is upstream SDL3. SDL3 games ship the sdl3-sdl2-backend shim, which hands video, audio and input to the CFW's SDL2 (fbdev, rotation, KMSDRM quirks)."
+            fix = "Build against https://github.com/bmdhacks/SDL/tree/sdl2-backend and ship its libSDL3.so.0 instead."
+            gpu = _sdl3_gpu_use(port)
+            if gpu == "compute":
+                # the shim's GLES GPU backend (SPIRV-Cross) has no compute pipelines yet: "will assert if called"
+                msg += (" The game renders through SDL3's GPU API and uses compute pipelines. The shim runs the GPU API on GLES 3.x, but has no compute"
+                        " pipelines yet, so it can't run this game as it is. Upstream SDL3 runs it only on Vulkan, which needs a Vulkan driver and SDL3's own"
+                        " KMSDRM, so it works on few devices and CFWs.")
+                fix = ("Disable the compute passes in the game (often optional effects such as FSR or motion blur) and use the shim's GLES GPU backend,"
+                       " or add compute pipelines to the shim's GLES backend (GLES 3.1 has compute shaders).")
+            elif gpu == "gpu":
+                msg += " The game renders through SDL3's GPU API; the shim provides it on GLES 3.x (SPIR-V shaders through SPIRV-Cross), so no Vulkan is needed."
+            yield Finding("libs.sdl3", ERROR, msg, file=rel, fix=fix)
         if re.match(r"^lib(X11|xcb)\.so", name) and not re.search(r"westonwrap|weston_pkg", scripts_all) and not x11_done:
             x11_done = True
             yield Finding("libs.x11", WARN, f"Bundles X11 libraries ({rel.rsplit('/', 1)[0]}/libX*, libxcb*) without Westonpack. On KMS/DRM devices nothing draws through X11, the binary only links it.", file=rel,

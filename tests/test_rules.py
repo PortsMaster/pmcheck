@@ -337,6 +337,23 @@ class ScriptNoise(unittest.TestCase):
 
 
 class SDL3(unittest.TestCase):
+    def test_upstream_sdl3_with_gpu_compute(self):
+        # SDL3 GPU API with compute pipelines: the shim has no compute yet, so its plain "ship the shim" fix is wrong
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            gd = Path(t) / "testgame"
+            shutil.copy(FIX / "gpucompute.aarch64", gd / "testgame.aarch64")
+            (gd / "libs.aarch64").mkdir()
+            shutil.copy(FIX / "hello.aarch64", gd / "libs.aarch64" / "libSDL3.so.0")
+            port = load(t)
+            try:
+                f = [x for x in run_all(port) if x.rule == "libs.sdl3"]
+            finally:
+                port.cleanup()
+            self.assertEqual(len(f), 1)
+            self.assertIn("compute pipelines", f[0].message)
+            self.assertIn("Disable the compute passes", f[0].fix)
+
     def test_needed_by_unlinked_lib(self):
         # libbar.so.1 NEEDs libcairo.so.2, but the game binary does not link libbar
         with tempfile.TemporaryDirectory() as t:
