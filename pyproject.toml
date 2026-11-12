@@ -20,4 +20,4 @@ pmcheck = "pmcheck.__main__:main"
 packages = ["pmcheck"]
 
 [tool.setuptools.package-data]
-pmcheck = ["g2keys.json", "runtimes.json", "prompt/rules.md", "prompt/reference.md"]
+pmcheck = ["g2keys.json", "runtimes.json", "script_lines.json", "prompt/rules.md", "prompt/reference.md"]

@@ -17,6 +17,7 @@ from . import data
 from .findings import Finding, ERROR, WARN, INFO
 from .ini import check_ini
 from .gptk import check_gptk
+from . import scriptnorm
 
 CHECKS = []
 
@@ -544,13 +545,16 @@ def doc_refs(port):
     for f in port.files():
         if f.stat().st_size > 256_000 or f.suffix.lower() in (".md", ".json", ".xml", ".png", ".jpg", ".apk", ".dll", ".so"):
             continue
+        if re.search(r"(^|/)(licen[cs]es?|legal)(/|$)", port.rel(f), re.I) or re.search(r"licen[cs]e|copying|notice|copyright", f.name, re.I):
+            continue   # third-party licence texts name their own project's files
         try:
             raw = f.read_bytes()
         except OSError:
             continue
         if b"\0" in raw[:4096]:
             continue
-        for m in re.finditer(r"(?<![\w/.-])(?:\.\./)?([\w-]+\.md)\b", raw.decode("utf-8", "replace")):
+        text = "\n".join(l for l in raw.decode("utf-8", "replace").splitlines() if not l.lstrip().startswith(("#", "--", "//")))
+        for m in re.finditer(r"(?<![\w/.-])(?:\.\./)?([\w-]+\.md)\b", text):
             name = m.group(1)
             if name.lower() not in shipped and not name.lower().startswith(("license", "changelog")):
                 seen.setdefault(name, []).append(port.rel(f))
@@ -614,13 +618,17 @@ def binaries(port):
         except OSError:
             pass
     for group in by_hash.values():
+        stems = {}
+        for g in group:
+            stems.setdefault(g.name.split(".so")[0], []).append(g)
+        group = max(stems.values(), key=len)   # copies under other names are aliases the game loads on purpose
         if len(group) < 2:
             continue
         so = elf_info(group[0])["soname"]
         if so and any(g.name == so for g in group) and len(group) == 2:
             continue   # one file is named after the SONAME: libs.duplicate decides
         names = ", ".join(port.rel(g) for g in group)
-        keep = f"keep {so}" + (" (plus the unversioned name if .NET P/Invoke opens it)" if re.search(r"\bmono\b|dotnet", scripts_all, re.I) else "") if so else "keep one"
+        keep = f"keep {so}, plus any other name the game opens itself" if so else "keep one"
         yield Finding("libs.identical", WARN, f"Identical copies of one library: {names}; {keep}.", file=port.rel(group[0]),
                       fix="Delete the extra copies.")
     x11_done = False
@@ -967,6 +975,26 @@ def _script(port, s):
         yield Finding("sh.sdl-driver", sev, "Never force SDL_VIDEODRIVER/SDL_AUDIODRIVER; the CFW selects the backend.", file=f, line=n)
     for n, l in grep(r"^\s*export\s+LD_PRELOAD="):
         yield Finding("sh.ld_preload", ERROR, "export LD_PRELOAD leaks into gptokeyb; set it as a prefix on the game command only.", file=f, line=n)
+    # How much of the script is neither template nor game-specific: unusual logic reviewers will ask about
+    common = data.SCRIPT_LINES["lines"]
+    rare = [(n, raw) for n, k, raw in scriptnorm.lines("\n".join(lines))
+            if k not in common and k not in scriptnorm.TEMPLATE and not scriptnorm.exempt(k)]
+    pc = data.SCRIPT_LINES["percentiles"]
+    if len(rare) > pc["90"]:
+        blocks = []
+        for n, raw in rare:
+            if blocks and n - blocks[-1][1] <= 3:
+                blocks[-1][1] = n
+            else:
+                blocks.append([n, n, raw.strip()])
+        shown = "; ".join((f"{a}-{b}" if a != b else f"{a}") + f" ({t[:50]}{'...' if len(t) > 50 else ''})" for a, b, t in blocks[:8])
+        more = f" and {len(blocks) - 8} more" if len(blocks) > 8 else ""
+        sev = WARN if len(rare) > pc["95"] else INFO
+        yield Finding("sh.nonstandard", sev,
+                      f"{len(rare)} lines of logic that no template and fewer than {data.SCRIPT_LINES['min_scripts']} of {data.SCRIPT_LINES['scripts']} merged ports use "
+                      f"(a merged port has {pc['50']} at the median, {pc['95']} at the 95th percentile). Lines {shown}{more}.",
+                      file=f, line=rare[0][0],
+                      fix="For each block: which real-device problem does it fix, and does control.txt / funcs.txt / libgl_*.txt / mod_*.txt already do it? Without an answer it goes.")
     # Reinventing what PortMaster's own files already do (the CFW's libgl_*.txt / mod_*.txt decide GPU and gl4es)
     libgl_set = [(n, l) for n, l in grep(r"^\s*(export\s+|unset\s+)?[^#]*\bLIBGL_(ES|GL|FB|EGL|GLES)\b\s*=?")
                  if re.search(r"\bLIBGL_(ES|GL|FB|EGL|GLES)=|\bunset\b.*\bLIBGL_(ES|GL|FB|EGL|GLES)\b|export\s+LIBGL_(ES|GL|FB|EGL|GLES)\b", l)

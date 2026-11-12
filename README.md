@@ -26,6 +26,7 @@ Exit codes: 0 ok, 1 errors found (0 with `--warn-only`), 2 could not load.
 `pmcheck/rules.py` (one `@check` function per area), `pmcheck/ini.py` (gptokeyb2), lists in `pmcheck/data.py`.
 The AI prompt is `pmcheck/prompt/rules.md`, so admins can edit it without touching code.
 gptokeyb2 key names: `pmcheck/g2keys.json`, generated from `gptokeyb2/src/keys.c`.
+Standard launch-script lines (`sh.nonstandard`): `pmcheck/script_lines.json`, normalized lines found in at least 10 merged PortMaster-New scripts plus the percentiles of non-standard lines per merged port. Refresh it with `tools/build_script_lines.py` (instructions at the top of the file) when the template changes.
 
 ## Bot deployment (build server)
 ```bash
