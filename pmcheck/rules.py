@@ -1,4 +1,5 @@
 """All checks. Each check takes a Port and yields Findings. Nothing here executes port code."""
+import hashlib
 import json
 import os
 import re
@@ -353,7 +354,9 @@ def port_json(port):
     if need:
         top, top_file = max(need, key=lambda x: version_tuple(x[0]))
         mg = str(attr.get("min_glibc") or "")
-        if not mg:
+        if version_tuple(top) < version_tuple(data.GLIBC_BASELINE):
+            pass   # every supported CFW has it (old baseline Ubuntu 20.04, glibc 2.31): min_glibc can stay empty
+        elif not mg:
             yield Finding("port.json.min_glibc", ERROR, f"min_glibc is empty but {port.rel(top_file)} needs GLIBC_{top}.", file=f,
                           fix=f'"min_glibc": "{top}"')
         elif version_tuple(mg) < version_tuple(top):
@@ -497,6 +500,25 @@ def readme(port):
 
 
 @check
+def patcher_file(port):
+    """PortMaster's patcher (utils/patcher) watches the patch script's output for "Patching process failed!";
+    its thread reports success whenever the script ends without it."""
+    if port.gamedir is None:
+        return
+    for s in port.scripts:
+        for m in re.finditer(r"PATCHER_FILE=[\"']?([^\"'\s]+)", script_text(port, s)):
+            target = _resolve(port, m.group(1))
+            if target is None or not target.is_file():
+                continue
+            text = port.read_text(target)
+            if re.search(r"\bexit\s+[1-9]|\bexit\s+\$", text) and "Patching process failed!" not in text:
+                near = re.search(r"Patch\w*\s+(process\s+)?failed[^!\n\"']*", text, re.I)
+                yield Finding("patcher.fail-marker", WARN, f"{port.rel(target)} can fail but never prints \"Patching process failed!\""
+                              + (f" (it prints {near.group(0).strip()!r})" if near else "") + "; the patcher then shows its success screen.",
+                              file=port.rel(target), fix='echo "Patching process failed!" before exit 1 (PATCH_FAIL_MSG:<text> first to set the message).')
+
+
+@check
 def patcher_questions(port):
     """PortMaster's patcher runs the PATCHER_QUESTIONS file as Lua in its own global environment (utils/patcher/main.lua,
     load(..., _G)); it should only build and return the questions table."""
@@ -584,6 +606,23 @@ def binaries(port):
             bundled[p.name] = p
             if info["soname"]:
                 bundled.setdefault(info["soname"], p)
+    # byte-identical copies of one library (libfoo.so + libfoo.so.1.2): libs.duplicate covers the SONAME pair
+    by_hash = {}
+    for p in sorted(set(bundled.values()), key=lambda x: port.rel(x)):
+        try:
+            by_hash.setdefault((p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest()), []).append(p)
+        except OSError:
+            pass
+    for group in by_hash.values():
+        if len(group) < 2:
+            continue
+        so = elf_info(group[0])["soname"]
+        if so and any(g.name == so for g in group) and len(group) == 2:
+            continue   # one file is named after the SONAME: libs.duplicate decides
+        names = ", ".join(port.rel(g) for g in group)
+        keep = f"keep {so}" + (" (plus the unversioned name if .NET P/Invoke opens it)" if re.search(r"\bmono\b|dotnet", scripts_all, re.I) else "") if so else "keep one"
+        yield Finding("libs.identical", WARN, f"Identical copies of one library: {names}; {keep}.", file=port.rel(group[0]),
+                      fix="Delete the extra copies.")
     x11_done = False
     for name, p in sorted(bundled.items()):
         if p.name != name:
@@ -928,6 +967,52 @@ def _script(port, s):
         yield Finding("sh.sdl-driver", sev, "Never force SDL_VIDEODRIVER/SDL_AUDIODRIVER; the CFW selects the backend.", file=f, line=n)
     for n, l in grep(r"^\s*export\s+LD_PRELOAD="):
         yield Finding("sh.ld_preload", ERROR, "export LD_PRELOAD leaks into gptokeyb; set it as a prefix on the game command only.", file=f, line=n)
+    # Reinventing what PortMaster's own files already do (the CFW's libgl_*.txt / mod_*.txt decide GPU and gl4es)
+    libgl_set = [(n, l) for n, l in grep(r"^\s*(export\s+|unset\s+)?[^#]*\bLIBGL_(ES|GL|FB|EGL|GLES)\b\s*=?")
+                 if re.search(r"\bLIBGL_(ES|GL|FB|EGL|GLES)=|\bunset\b.*\bLIBGL_(ES|GL|FB|EGL|GLES)\b|export\s+LIBGL_(ES|GL|FB|EGL|GLES)\b", l)
+                 and not re.match(r"\s*(echo|printf)\b", l)]
+    if libgl_set:
+        more = f" (also lines {', '.join(str(n) for n, _ in libgl_set[1:6])})" if len(libgl_set) > 1 else ""
+        yield Finding("sh.libgl-manual", WARN, f"The script sets or unsets gl4es' LIBGL_ES/GL/FB/EGL/GLES itself{more}; libgl_${{CFW_NAME}}.txt sets them per device (or skips gl4es on purpose).",
+                      file=f, line=libgl_set[0][0], fix="Source libgl_${CFW_NAME}.txt (libgl_default.txt fallback) from $GAMEDIR and drop the manual lines.")
+    probes = grep(r"/sys/(module|bus/platform/drivers)/(panfrost|mali|lima|msm|adreno)|libmali[^\s\"']*\.so|/dev/mali")
+    if probes:
+        more = f" (also lines {', '.join(str(n) for n, _ in probes[1:6])})" if len(probes) > 1 else ""
+        yield Finding("sh.gpu-probe", WARN, f"The script probes for GPU drivers (Panfrost/Mali/libmali){more}; picking the GPU stack is the CFW's job (its libgl_*.txt / mod_*.txt).",
+                      file=f, line=probes[0][0], fix="Delete it; source libgl_${CFW_NAME}.txt and let the CFW decide.")
+    # X="${X:-default}" only defaults the outside value, it is still a knob
+    assigned = {m.group(1) for m in re.finditer(r"(?:^|[\s;(&|])(?:export\s+|local\s+|declare\s+(?:-\w+\s+)?)?([A-Z][A-Z0-9_]*)\+?=(\S*)", body, re.M)
+                if not re.match(r"[\"']?\$\{" + m.group(1) + r":?-", m.group(2))}
+    assigned |= set(re.findall(r"\b(?:read(?:\s+-\w+)*|for)\s+([A-Z][A-Z0-9_]*)\b", body))
+    assigned |= set(re.findall(r":\s+\"?\$\{([A-Z][A-Z0-9_]*):?=", body))   # : "${X:=default}" sets X
+    knobs = {}
+    for n, l in code:
+        for m in re.finditer(r"\$\{([A-Z][A-Z0-9_]*):?[-=]", l):
+            v = m.group(1)
+            if v in assigned or v in data.PM_ENV or v.startswith(data.PM_ENV_PREFIX):
+                continue
+            knobs.setdefault(v, n)
+    if knobs:
+        names = sorted(knobs, key=knobs.get)
+        yield Finding("sh.env-knobs", WARN, f"Override switches read from the environment that nothing sets: {', '.join(names[:8])}{' and more' if len(names) > 8 else ''}. "
+                      "Players start ports from the menu and can't set them; they're leftover test switches.",
+                      file=f, line=knobs[names[0]], fix="Drop them and keep the one path the port uses.")
+    # libgl_default.txt finds gl4es.<arch>/ and libs.<arch>/ through $PWD
+    gl_lines = grep(r"^\s*(source|\.)\s+.*libgl_(\$\{?CFW_NAME\}?|default)\.txt")
+    if gl_lines and port.gamedir is not None and any(d.is_dir() and d.name.startswith(("gl4es", "libs")) for d in port.gamedir.iterdir()):
+        first = gl_lines[0][0]
+        cds = [(n, l) for n, l in code if n < first and re.match(r"\s*cd\s", l)]
+        if cds:
+            n_cd, l_cd = cds[-1]
+            arg = l_cd.split(None, 1)[1].split(";")[0].split("&&")[0].strip().strip("\"'").rstrip("/")
+            assigns = dict(re.findall(r"^\s*(?:export\s+)?(\w+)=\"?([^\"\s]+)\"?\s*$", "\n".join(x for k, x in code if k < n_cd), re.M))
+            m = re.fullmatch(r"\$\{?(\w+)\}?", arg)
+            val = assigns.get(m.group(1), arg) if m and m.group(1) != "GAMEDIR" else arg
+            val = val.rstrip("/")
+            ok = re.fullmatch(r"\$\{?GAMEDIR\}?|/?\$\{?directory\}?/ports/" + re.escape(port.gamedir.name), val)
+            if not ok:
+                yield Finding("sh.libgl-cwd", WARN, f"libgl_*.txt is sourced after cd {arg}; libgl_default.txt looks for gl4es/ and libs/ in $PWD, so it doesn't find the port's folders.",
+                              file=f, line=first, fix='cd "$GAMEDIR" before sourcing it (cd into the data folder afterwards).')
     if re.search(r"libgl_default\.txt", body) and not re.search(r"libgl_\$\{?CFW_NAME\}?\.txt", body):
         n = grep(r"libgl_default\.txt")[0][0]
         yield Finding("sh.libgl", ERROR, "Source libgl_${CFW_NAME}.txt with a libgl_default.txt fallback, never libgl_default.txt alone.", file=f, line=n)
