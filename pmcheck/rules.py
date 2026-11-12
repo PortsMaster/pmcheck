@@ -490,6 +490,30 @@ def readme(port):
             yield Finding("readme.section", WARN if h != "compile" else INFO, f"README has no '## {h.title()}' section.", file=port.rel(p))
 
 
+@check
+def doc_refs(port):
+    """A player-facing text (script, setup message, placeholder note) pointing at a .md file the package lacks."""
+    shipped = {f.name.lower() for f in port.files()}
+    seen = {}
+    for f in port.files():
+        if f.stat().st_size > 256_000 or f.suffix.lower() in (".md", ".json", ".xml", ".png", ".jpg", ".apk", ".dll", ".so"):
+            continue
+        try:
+            raw = f.read_bytes()
+        except OSError:
+            continue
+        if b"\0" in raw[:4096]:
+            continue
+        for m in re.finditer(r"(?<![\w/.-])(?:\.\./)?([\w-]+\.md)\b", raw.decode("utf-8", "replace")):
+            name = m.group(1)
+            if name.lower() not in shipped and not name.lower().startswith(("license", "changelog")):
+                seen.setdefault(name, []).append(port.rel(f))
+    for name, where in sorted(seen.items()):
+        where = sorted(set(where))
+        yield Finding("files.missing-doc", WARN, f"{', '.join(where[:3])} send{'s' if len(where) == 1 else ''} the player to {name}, which the package does not contain.",
+                      file=where[0], fix="Point it at README.md, or ship the file.")
+
+
 # ---------------------------------------------------------------- binaries / libs
 def _in_gl4es(p):
     return any(part.startswith("gl4es") for part in p.parts)
@@ -948,7 +972,7 @@ def _script(port, s):
         # Only an echo that is the last thing before an error exit: nothing but cleanup in between.
         nxt = None
         for _, x in code[i + 1:i + 6]:
-            if re.match(r"\s*$|\s*(echo\b|\$ESUDO\s+umount|umount|rm\s|sleep\s|\}|fi\b)", x):
+            if re.match(r"\s*$|\s*(echo\b|\$ESUDO\s+umount|umount|rm\s|sleep\s|pm_finish\b|\}|fi\b)", x):
                 continue
             nxt = x
             break
@@ -1085,6 +1109,11 @@ def ini_files(port):
     for p in sorted(port.gamedir.glob("*.ini")):
         text = port.read_text(p)
         if "[controls" not in text or not _gptk_config(p.name, scripts):
+            continue
+        entries = [l for l in text.splitlines() if l.strip() and not l.strip().startswith(("#", ";", "["))]
+        if not entries:
+            yield Finding("ini.empty", INFO, f"{port.rel(p)} has no settings or mappings; gptokeyb2 only needs the binary name for the kill switch.",
+                          file=port.rel(p), fix='Delete the file and drop -c: $GPTOKEYB2 "$BINARY" &')
             continue
         yield from check_ini(text, port.rel(p), scripts)
     for p in sorted(port.gamedir.rglob("*.gptk")):
