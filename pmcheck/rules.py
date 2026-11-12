@@ -327,12 +327,18 @@ def port_json(port):
     if found and not arch and not bad and not runtimes:   # harbourmaster ignores arch when a runtime is set
         yield Finding("port.json.arch", ERROR, f"Native binaries for {', '.join(found)} but arch is empty.", file=f,
                       fix=f'"arch": {json.dumps(found)}')
+    # arch is an OR list; device_info.txt adds "armhf" to an aarch64 device's capabilities only when it
+    # has a 32-bit userland. There are no armhf-only devices. Prebuilt helpers (gamepad-picker, gptokeyb...) don't count.
+    found = sorted({i["arch"] for p, i in elves(port) if not data.PREBUILT_RE.match(p.name)}) or found
+    if "armhf" in found and "aarch64" in found:
+        yield Finding("port.json.arch", INFO, "Ships an armhf build next to the aarch64 one. Every device runs the aarch64 build and some have no 32-bit userland: ask the porter why the armhf version is included.",
+                      file=f)
+    elif "armhf" in found and arch and "armhf" not in arch:
+        yield Finding("port.json.arch", WARN, "Only armhf binaries, but arch does not list armhf: the port is offered on devices without a 32-bit userland, where it can't start.",
+                      file=f, fix='"arch": ["armhf"]')
     for a in found:
-        if arch and a not in arch:
-            if a == "armhf" and "aarch64" in arch:
-                yield Finding("port.json.arch", INFO, "Ships armhf binaries (they run on aarch64 devices with a 32-bit userland); add armhf to arch only if the port also runs on armhf devices.", file=f)
-            else:
-                yield Finding("port.json.arch", WARN, f"Ships {a} binaries but arch does not list {a}.", file=f)
+        if arch and a not in arch and a != "armhf":   # armhf is handled above
+            yield Finding("port.json.arch", WARN, f"Ships {a} binaries but arch does not list {a}.", file=f)
     # min_glibc
     # harbourmaster compares min_glibc with the native glibc (device_info.txt CFW_GLIBC, getconf), so binaries
     # of an arch the port doesn't list (armhf next to aarch64) only need the 32-bit userland's own glibc
@@ -488,6 +494,24 @@ def readme(port):
         alt = ("compile", "build", "building") if h == "compile" else (h,)
         if not any(x.startswith(alt) for x in heads):
             yield Finding("readme.section", WARN if h != "compile" else INFO, f"README has no '## {h.title()}' section.", file=port.rel(p))
+
+
+@check
+def patcher_questions(port):
+    """PortMaster's patcher runs the PATCHER_QUESTIONS file as Lua in its own global environment (utils/patcher/main.lua,
+    load(..., _G)); it should only build and return the questions table."""
+    scripts = "\n".join(script_text(port, s) for s in port.scripts)
+    if "PATCHER_QUESTIONS" not in scripts or port.gamedir is None:
+        return
+    for q in port.gamedir.rglob("*.lua"):
+        text = port.read_text(q)
+        code = "\n".join(l for l in text.splitlines() if not l.strip().startswith("--"))
+        if q.name not in scripts or not re.search(r"\bquestion\s*=", code):
+            continue
+        bad = sorted({m.group(0).strip("( ") for m in re.finditer(r"\b(require|os\.execute|os\.remove|os\.rename|io\.popen|io\.open|loadstring|dofile|setmetatable|love\.|_G\b|package\.)\s*\(?|\bTalkies\b|\btalkies\b", code)})
+        if bad:
+            yield Finding("patcher.questions-code", WARN, f"{port.rel(q)} runs inside PortMaster's patcher with its full Lua environment and does more than return the questions: {', '.join(bad)}.",
+                          file=port.rel(q), fix="Only build and return the questions table; don't change the patcher's UI or touch files from it.")
 
 
 @check

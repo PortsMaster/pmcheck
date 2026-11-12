@@ -199,6 +199,8 @@ MUTATIONS = [
     ("ini stick without deadzone", lambda r: ini(r, "[controls]\nleft_analog_up = up\n"), "ini.deadzone", "INFO"),
     ("ini not passed", lambda r: ini(r, "[controls]\na = space\n", pass_c=False), "ini.unused", "WARN"),
     ("note names a missing doc", write("testgame/data/PUT_FILES_HERE.txt", "See ../testgame.md for installation.\n"), "files.missing-doc", "WARN"),
+    ("patcher questions change the UI", both(write("testgame/setup/questions.lua", "local questions = {\n  { id = \"Q\", question = \"Pick one\", options = { { \"a\", \"A\" } } },\n}\nlocal ok, t = pcall(require, \"talkies\")\nreturn questions\n"),
+                                              insert('export PATCHER_QUESTIONS="$GAMEDIR/setup/questions.lua"\n')), "patcher.questions-code", "WARN"),
     ("ini with nothing in it", lambda r: ini(r, "# kill switch only\n[controls]\n"), "ini.empty", "INFO"),
     ("echo, pm_finish, exit", insert('if [ ! -f data.pak ]; then\n  echo "data.pak missing"\n  sleep 5\n  pm_finish\n  exit 1\nfi\n'), "sh.echo-message", "WARN"),
     ("gptk bad key", lambda r: gptk(r, "a = return\n"), "gptk.key", "ERROR"),
@@ -264,6 +266,8 @@ VALID = [
     ("gl driver export guarded on LIBGL_ES", insert('if [ -f "$controlfolder/libgl_${CFW_NAME}.txt" ]; then\n  source "$controlfolder/libgl_${CFW_NAME}.txt"\nelse\n  source "$controlfolder/libgl_default.txt"\nfi\nif [[ "$LIBGL_ES" != "" ]]; then\n  export SDL_VIDEO_GL_DRIVER="$GAMEDIR/gl4es.${DEVICE_ARCH}/libGL.so.1"\nfi\n')),
     ("README names a shipped patch", both(write("testgame/patches/game-fixes.patch", "x"), write("testgame/README.md", README + "\nApply `game-fixes.patch` first.\n"))),
     ("note names README.md", write("testgame/data/PUT_FILES_HERE.txt", "See ../README.md for installation.\n")),
+    ("patcher questions built from the screen size", both(write("testgame/setup/questions.lua", "local questions = {\n  { id = \"Q\", question = \"Pick one\", options = { { \"a\", \"A\" } } },\n}\nlocal w = tonumber(os.getenv(\"DISPLAY_WIDTH\"))\nif w and w > 640 then table.insert(questions, { id = \"R\", question = \"Res?\", options = {} }) end\nreturn questions\n"),
+                                                         insert('export PATCHER_QUESTIONS="$GAMEDIR/setup/questions.lua"\n'))),
     ("README Building instead of Compile", write("testgame/README.md", README.replace("## Compile", "## Building"))),
     ("HOME only as bind_directories fallback", insert('mkdir -p "$GAMEDIR/conf/.game"\nif type bind_directories >/dev/null 2>&1; then\n  bind_directories ~/.game "$GAMEDIR/conf/.game"\nelse\n  export HOME="$GAMEDIR/conf"\nfi\n')),
     ("SDL driver only logged", insert('echo "SDL_VIDEODRIVER=$SDL_VIDEODRIVER"\n')),
@@ -358,6 +362,34 @@ class Mutations(unittest.TestCase):
                 mutate(t)
                 got = {(f.rule, f.severity) for f in findings(t)}
                 self.assertIn((rule, sev), got, f"{name}: expected {rule} {sev}, got {sorted(got)}")
+
+
+class ArmhfNote(unittest.TestCase):
+    def rules(self, extra):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            extra(t)
+            return {(f.rule, f.severity) for f in findings(t)}
+
+    def test_armhf_only_without_armhf_arch(self):
+        got = self.rules(lambda r: (gd(r) / "testgame.aarch64").write_bytes((FIX / "hello.armhf").read_bytes()))
+        self.assertIn(("port.json.arch", "WARN"), got)
+
+    def test_armhf_only_with_armhf_arch(self):
+        got = self.rules(lambda r: ((gd(r) / "testgame.aarch64").write_bytes((FIX / "hello.armhf").read_bytes()), pj(r, arch=["armhf"])))
+        self.assertNotIn(("port.json.arch", "WARN"), got)
+        self.assertNotIn(("port.json.arch", "INFO"), got)
+
+    def test_armhf_port_with_aarch64_helper(self):
+        got = self.rules(lambda r: ((gd(r) / "testgame.aarch64").rename(gd(r) / "gamepad-picker.aarch64"),
+                                    shutil.copy(FIX / "hello.armhf", gd(r) / "testgame.armhf"), pj(r, arch=["armhf"])))
+        self.assertNotIn(("port.json.arch", "WARN"), got)
+        self.assertNotIn(("port.json.arch", "INFO"), got)
+
+    def test_armhf_next_to_aarch64(self):
+        got = self.rules(lambda r: shutil.copy(FIX / "hello.armhf", gd(r) / "testgame.armhf"))
+        self.assertIn(("port.json.arch", "INFO"), got)
+        self.assertNotIn(("port.json.arch", "WARN"), got)
 
 
 class ValidVariants(unittest.TestCase):
