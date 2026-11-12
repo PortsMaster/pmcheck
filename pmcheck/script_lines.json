@@ -3,11 +3,11 @@
 "scripts": 1536,
 "min_scripts": 10,
 "percentiles": {
-"50": 1,
-"75": 3,
-"90": 7,
-"95": 13,
-"99": 33
+"50": 0,
+"75": 0,
+"90": 1,
+"95": 2,
+"99": 7
 },
 "lines": {
 "$ESUDO P --quiet --no-check runtime_check $V.squashfs": 275,
@@ -180,7 +180,7 @@
 "export SDL_VIDEO_GL_DRIVER=P": 74,
 "export TERM=linux": 49,
 "export V=$GAMEDIR": 33,
-"export V=$V": 29,
+"export V=$V": 28,
 "export V=FRT_NO_EXIT_SHORTCUTS": 151,
 "export V=N": 66,
 "export V=Name": 11,

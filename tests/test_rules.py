@@ -105,6 +105,13 @@ def rules_of(path, sev=None, pr=False):
         port.cleanup()
 
 
+class Report(unittest.TestCase):
+    def test_markdown_escapes_finding_text(self):
+        from pmcheck.report import md
+        self.assertEqual(md("libgl_*.txt / LIX_CURSOR_MIN_SCALE"), "libgl\\_\\*.txt / LIX\\_CURSOR\\_MIN\\_SCALE")
+        self.assertEqual(md("use `libgl_${CFW_NAME}.txt`"), "use `libgl_${CFW_NAME}.txt`")
+
+
 class GoodPort(unittest.TestCase):
     def test_clean(self):
         with tempfile.TemporaryDirectory() as t:

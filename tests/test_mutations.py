@@ -288,6 +288,8 @@ VALID = [
     ("LIBGL_FB only read", insert('if [[ "$LIBGL_FB" != "" ]]; then\n  echo gl4es\nfi\n')),
     ("own variable with a default", insert('RES="$(cat "$GAMEDIR/res.txt" 2>/dev/null)"\necho "${RES:-640}"\n')),
     ("CFW variables with defaults", insert('echo "${DISPLAY_WIDTH:-640} ${SDL_VIDEODRIVER:-} ${XDG_CONFIG_HOME:-$HOME/.config} ${LD_LIBRARY_PATH:-}"\n')),
+    ("own launcher config and launch arguments (lix)", insert("if ! grep -qx \"PLAY=1\" \"$GAMEDIR/launch.cfg\" 2>/dev/null; then\n  pm_finish\n  exit 0\nfi\nsource \"$GAMEDIR/game.cfg\"\nexport GAME_CURSOR_SCALE\nsed -i \"s/^mouse_scale = .*/mouse_scale = $MOUSE_SCALE/\" \"$GAMEDIR/game.gptk\"\nif [ \"$SCREEN_MODE\" = \"1\" ]; then\n  FULL=\"--fullscreen\"\nelse\n  FULL=\"--hardfull=${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}\"\nfi\n: > \"$GAMEDIR/log.txt\" && exec > >(tee \"$GAMEDIR/log.txt\") 2>&1\n")),
+    ("sdl3 shim forwarding, OmniOSK prefix, bind to $HOME", insert('mkdir -p \"$GAMEDIR/conf/app\"\nbind_directories \"$HOME/.config/app\" \"$GAMEDIR/conf/app\"\nif [ -n \"$SDL_VIDEODRIVER\" ]; then\n  export SDL3SHIM_SDL2_VIDEODRIVER=\"$SDL_VIDEODRIVER\"\n  GAME_SDL_VIDEODRIVER=sdl2\nfi\nSDL_VIDEODRIVER=\"$GAME_SDL_VIDEODRIVER\" LD_PRELOAD=\"$GAMEDIR/libs.aarch64/libomni_osk.so\" ./testgame.aarch64 --version\n')),
     ("README Building instead of Compile", write("testgame/README.md", README.replace("## Compile", "## Building"))),
     ("HOME only as bind_directories fallback", insert('mkdir -p "$GAMEDIR/conf/.game"\nif type bind_directories >/dev/null 2>&1; then\n  bind_directories ~/.game "$GAMEDIR/conf/.game"\nelse\n  export HOME="$GAMEDIR/conf"\nfi\n')),
     ("SDL driver only logged", insert('echo "SDL_VIDEODRIVER=$SDL_VIDEODRIVER"\n')),

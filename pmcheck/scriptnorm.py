@@ -2,8 +2,9 @@
 
 A line is "standard" when its normalized form appears in enough merged PortMaster-New scripts
 (script_lines.json, built by tools/build_script_lines.py) or in the documented templates below.
-Game-specific lines (own variables set to a path, the launch command and its arguments) don't count:
-what the rule looks for is unusual logic.
+Only lines that reach outside the port count: system paths (/proc, /sys, /etc, /usr/lib ...), $HOME,
+driver/audio environment variables, system tools, CFW-name branching. A port reading its own config,
+setting its own variables and building its launch arguments is game-specific, not unusual logic.
 """
 import re
 
@@ -18,6 +19,7 @@ TEMPLATE = {
     "export SDL_VIDEO_EGL_DRIVER=P",
     "if ! gunzip -c $V | tar --no-same-owner -xf -; then",
     "> P && exec > >(tee P) N>&N",
+    ": > P && exec > >(tee P) N>&N",
 }
 
 
@@ -55,6 +57,28 @@ def exempt(k):
     if re.match(r"(\$TASKSET\s+)?(\./|\$GAMEDIR/|P\b|\$V\b|\$BINARY|mono\b|java\b|box64\b|box86\b|\$GPTOKEYB2?\b|pm_platform_helper\b)", k):
         return True
     return bool(re.fullmatch(r"fi|else|done|esac|;;|\}|then|do", k))
+
+
+SYSTEM = re.compile(r"""(?x)
+   (?<![\w$}/])/(proc|sys|dev(?!/null\b)|etc|usr|lib|lib32|lib64|tmp|var|run|bin|sbin|mnt|media)(/|\b)
+ | \$HOME\b | \$\{HOME\} | (^|\s)~/
+ | \b(export|unset)\b[^#]*\b(LIBGL_|SDL_(VIDEO|AUDIO|RENDER|HINT)|LD_PRELOAD|ALSA_|PULSE_|MESA_|GALLIUM_|PIPEWIRE_)\w*
+ | ^\s*(LIBGL_|SDL_(VIDEO|AUDIO|RENDER)|ALSA_|PULSE_|MESA_|GALLIUM_)\w*=
+ | \b(systemctl|modprobe|insmod|sysctl|swapon|swapoff|amixer|alsactl|nmcli|killall|pkill|setenforce)\b
+ | \bmount\b(?!.*squashfs) | \bumount\b
+ | \b(CFW_NAME|DEVICE_NAME|DEVICE_CPU)\b | os-release
+""")
+
+
+# Documented patterns that reach outside the port on purpose: PortMaster's bind helpers (target under $HOME),
+# the sdl3-sdl2-backend driver forwarding, and an LD_PRELOAD prefix on the launch line (OmniOSK).
+DOCUMENTED = re.compile(r"^\s*(bind_(directories|files)\b|(export\s+)?SDL3SHIM_\w+=|SDL_(VIDEO|AUDIO)DRIVER=\S*GAME_SDL_\w*DRIVER|LD_PRELOAD=\S+\s+\S)")
+
+
+def counted(k, raw, common):
+    """Does this line count as non-standard logic: rare, not template, not game-specific, and reaching outside the port?"""
+    return (k not in common and k not in TEMPLATE and not exempt(k) and not DOCUMENTED.match(raw)
+            and bool(SYSTEM.search(raw)))
 
 
 def lines(text):

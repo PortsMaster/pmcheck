@@ -25,7 +25,7 @@ def main(root):
         per.append(ls)
         freq.update({k for _, k, _ in ls})
     common = {k: c for k, c in freq.items() if c >= MIN_SCRIPTS}
-    counts = sorted(sum(1 for _, k, _ in ls if k not in common and k not in scriptnorm.TEMPLATE and not scriptnorm.exempt(k)) for ls in per)
+    counts = sorted(sum(1 for _, k, raw in ls if scriptnorm.counted(k, raw, common)) for ls in per)
     q = lambda f: counts[int(f * (len(counts) - 1))]
     out = {
         "generated": datetime.date.today().isoformat(),

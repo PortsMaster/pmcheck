@@ -977,10 +977,9 @@ def _script(port, s):
         yield Finding("sh.ld_preload", ERROR, "export LD_PRELOAD leaks into gptokeyb; set it as a prefix on the game command only.", file=f, line=n)
     # How much of the script is neither template nor game-specific: unusual logic reviewers will ask about
     common = data.SCRIPT_LINES["lines"]
-    rare = [(n, raw) for n, k, raw in scriptnorm.lines("\n".join(lines))
-            if k not in common and k not in scriptnorm.TEMPLATE and not scriptnorm.exempt(k)]
+    rare = [(n, raw) for n, k, raw in scriptnorm.lines("\n".join(lines)) if scriptnorm.counted(k, raw, common)]
     pc = data.SCRIPT_LINES["percentiles"]
-    if len(rare) > pc["90"]:
+    if len(rare) > pc["95"]:
         blocks = []
         for n, raw in rare:
             if blocks and n - blocks[-1][1] <= 3:
@@ -989,10 +988,11 @@ def _script(port, s):
                 blocks.append([n, n, raw.strip()])
         shown = "; ".join((f"{a}-{b}" if a != b else f"{a}") + f" ({t[:50]}{'...' if len(t) > 50 else ''})" for a, b, t in blocks[:8])
         more = f" and {len(blocks) - 8} more" if len(blocks) > 8 else ""
-        sev = WARN if len(rare) > pc["95"] else INFO
+        sev = WARN if len(rare) > pc["99"] else INFO
         yield Finding("sh.nonstandard", sev,
-                      f"{len(rare)} lines of logic that no template and fewer than {data.SCRIPT_LINES['min_scripts']} of {data.SCRIPT_LINES['scripts']} merged ports use "
-                      f"(a merged port has {pc['50']} at the median, {pc['95']} at the 95th percentile). Lines {shown}{more}.",
+                      f"{len(rare)} lines reach into the system (system paths, driver/audio variables, system tools, CFW checks) in ways no template and fewer than "
+                      f"{data.SCRIPT_LINES['min_scripts']} of {data.SCRIPT_LINES['scripts']} merged ports use (merged ports: {pc['50']} at the median, {pc['95']} at the 95th percentile, "
+                      f"{pc['99']} at the 99th). Lines {shown}{more}.",
                       file=f, line=rare[0][0],
                       fix="For each block: which real-device problem does it fix, and does control.txt / funcs.txt / libgl_*.txt / mod_*.txt already do it? Without an answer it goes.")
     # Reinventing what PortMaster's own files already do (the CFW's libgl_*.txt / mod_*.txt decide GPU and gl4es)
