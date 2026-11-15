@@ -446,9 +446,17 @@ def image_size(p):
     except Exception:
         pass
     with open(p, "rb") as fh:
-        head = fh.read(24)
-    if head[:8] == b"\x89PNG\r\n\x1a\n":
-        return struct.unpack(">II", head[16:24])
+        data_ = fh.read(1 << 20)
+    if data_[:8] == b"\x89PNG\r\n\x1a\n":
+        return struct.unpack(">II", data_[16:24])
+    if data_[:2] == b"\xff\xd8":   # JPEG: walk the segments to the frame header (SOF0..SOF15 except DHT/JPG/DAC)
+        i = 2
+        while i + 9 < len(data_) and data_[i] == 0xFF:
+            marker, seglen = data_[i + 1], struct.unpack(">H", data_[i + 2:i + 4])[0]
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                h, w = struct.unpack(">HH", data_[i + 5:i + 9])
+                return (w, h)
+            i += 2 + seglen
     return None
 
 
@@ -535,6 +543,21 @@ def patcher_questions(port):
         if bad:
             yield Finding("patcher.questions-code", WARN, f"{port.rel(q)} runs inside PortMaster's patcher with its full Lua environment and does more than return the questions: {', '.join(bad)}.",
                           file=port.rel(q), fix="Only build and return the questions table; don't change the patcher's UI or touch files from it.")
+
+
+@check
+def game_content(port):
+    """Files in a game's own content format (XNA: .xnb sprites/fonts, .xwb/.xsb audio banks) shipped with the port are
+    usually edited copies of the game's data, which a port can't redistribute."""
+    if port.gamedir is None:
+        return
+    hits = [f for f in port.files() if f.suffix.lower() in data.GAME_CONTENT_EXT
+            and "gamedata" not in (x.lower() for x in port.rel(f).split("/")[1:-1])]
+    if hits:
+        names = ", ".join(port.rel(f) for f in hits[:4]) + (", ..." if len(hits) > 4 else "")
+        yield Finding("files.game-content", INFO, f"Ships files in the game's own content format ({names}). If they are made from the game's files "
+                      "(recoloured sprites, edited fonts or sounds), they can't be redistributed.",
+                      file=port.rel(hits[0]), fix="Ask where they come from; build them on device from the player's copy at first launch, or ship a binary diff (xdelta) instead.")
 
 
 @check
@@ -1046,8 +1069,14 @@ def _script(port, s):
         yield Finding("sh.libgl", ERROR, "Source libgl_${CFW_NAME}.txt with a libgl_default.txt fallback, never libgl_default.txt alone.", file=f, line=n)
     # every libgl_*.txt sets LIBGL_ES in exactly the branch that puts gl4es on LD_LIBRARY_PATH, so either guard works
     gl_guard = '":$LD_LIBRARY_PATH:"' in body or re.search(r"(\[\[?|test)\s+(-n\s+|!\s+-z\s+)?\"?\$\{?LIBGL_ES\}?\"?", body)
-    if re.search(r"export\s+SDL_VIDEO_(GL|EGL)_DRIVER", body) and not gl_guard:
-        n = grep(r"SDL_VIDEO_(GL|EGL)_DRIVER")[0][0]
+    gl_exports = grep(r"export\s+SDL_VIDEO_(GL|EGL)_DRIVER")
+    sys_gles = [(n, l) for n, l in gl_exports if re.search(r"_DRIVER=[\"']?lib(GLESv2|GLESv1_CM|EGL)\.so[\d.]*[\"']?\s*$", l)]
+    for n, l in sys_gles:
+        yield Finding("sh.gl-driver-gles", INFO, "SDL_VIDEO_GL/EGL_DRIVER points at the device's own GLES/EGL library; SDL already loads it for a GLES context, "
+                      "and an unversioned .so name (a dev symlink) is often missing on device, so SDL ignores it and falls back.",
+                      file=f, line=n, fix="Drop the line, or say which device needed it.")
+    if len(gl_exports) > len(sys_gles) and not gl_guard:
+        n = [x for x in gl_exports if x not in sys_gles][0][0]
         yield Finding("sh.gl-driver", WARN, "SDL_VIDEO_GL/EGL_DRIVER is exported even when the CFW's libgl script skipped gl4es (a device with native GL, e.g. ROCKNIX on some GPUs); gl4es then gets forced in anyway.",
                       file=f, line=n, fix="Export them only when gl4es is in use, after sourcing libgl_${CFW_NAME}.txt:",
                       snippet='if [[ ":$LD_LIBRARY_PATH:" == *":$GAMEDIR/gl4es.${DEVICE_ARCH}:"* ]]; then\n'
@@ -1118,6 +1147,39 @@ def _script(port, s):
                 and not any(re.search(r"\bpm_(message|show_error)\b", x) for x in near)):
             yield Finding("sh.echo-message", WARN, "This message goes to the log, the player never sees it before the exit.", file=f, line=n,
                           fix='pm_show_error "..." --title "..."   (or pm_message on older templates)')
+    timed = []
+    for i, (n, l) in enumerate(code):
+        if not re.match(r"\s*pm_message\b", l) or re.search(r"PortMaster", l):
+            continue   # "needs a newer PortMaster": an old one may not have pm_show_error
+        for _, x in code[i + 1:i + 5]:
+            if re.match(r"\s*$|\s*(sleep\s|pm_finish\b)", x):
+                continue
+            if re.match(r"\s*exit\s+-?[1-9]", x):
+                timed.append(n)
+            break
+    if timed:
+        also = f" (also line{'s' if len(timed) > 2 else ''} {', '.join(map(str, timed[1:]))})" if len(timed) > 1 else ""
+        yield Finding("sh.error-message", INFO, f"pm_message right before an error exit{also}: a background card that closes on a timer or with the script, whether or not the player has read it.",
+                      file=f, line=timed[0], fix='pm_show_error "..." --title "..." waits for the player to press A; no sleep needed.')
+    home = r"(~|\$\{?HOME\}?)/\.asoundrc\b"
+    for i, (n, l) in enumerate(code):
+        m = re.search(r"\b(cp|mv|ln)\b[^;&|]*\s\"?" + home + r"\"?\s*$|>\s*\"?" + home, l)
+        if not m or re.search(r"asoundrc\.?bak|asoundrc\.\w*bak", l.split(m.group(0))[0] + m.group(0).rsplit(" ", 1)[0]):
+            continue
+        near = " ".join(x for _, x in code[max(0, i - 2):i + 1])
+        if re.search(r"!\s+-[ef]\s+\"?" + home, near):
+            continue   # only creates one when the CFW has none
+        src = re.search(r"\b(?:cp|mv|ln)\s+(?:-\w+\s+)*\"?([^\"\s]+)", l)
+        card = ""
+        if src:
+            target = _resolve(port, src.group(1))
+            if target is not None and target.is_file():
+                hw = re.findall(r"hw:([\w-]+)", port.read_text(target))
+                card = f" {port.rel(target)} hard-codes the sound card ({', '.join(sorted(set(hw)))}), so it only works on devices with that codec." if hw else ""
+        yield Finding("sh.asoundrc", WARN, "Overwrites the CFW's ~/.asoundrc (on ArkOS/dArkOS that is the device's own ALSA setup); if the game crashes or the device "
+                      "is switched off, the port's copy stays and breaks sound in every other port." + card,
+                      file=f, line=n, fix="Ask which device and symptom it fixes; a CFW audio problem belongs in the CFW or mod_<CFW>.txt. "
+                      "Merged ports only restore the CFW's own file: [ ! -f ~/.asoundrc ] && [ -f ~/.asoundrcbak ] && cp ~/.asoundrcbak ~/.asoundrc")
     for n, l in grep(r"^\s*(echo|printf)\b.*>\s*\"?(\$\{?CUR_TTY\}?|/dev/tty\d*)\"?"):
         if re.search(r"\\033c|\\e\[|\\033\[", l):
             continue   # clearing the console
@@ -1170,9 +1232,9 @@ def _script(port, s):
             by_code = {}
             for item in json.loads(out or "[]"):
                 by_code.setdefault((item["code"], item["message"]), []).append(item.get("line", 0))
-            for (code, msg), ns in by_code.items():
+            for (sc_code, msg), ns in by_code.items():
                 more = f" (also lines {', '.join(map(str, ns[1:6]))}{', ...' if len(ns) > 6 else ''})" if len(ns) > 1 else ""
-                yield Finding("sh.shellcheck", ERROR, f"SC{code}: {msg}{more}", file=f, line=ns[0])
+                yield Finding("sh.shellcheck", ERROR, f"SC{sc_code}: {msg}{more}", file=f, line=ns[0])
         except ValueError:
             pass
     if not re.search(r"gptokeyb", body, re.I):

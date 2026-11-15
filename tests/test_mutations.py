@@ -231,6 +231,13 @@ MUTATIONS = [
     ("lib missing its SONAME copy", lambda r: lib(r, "libfoo.so.1.6", fixture="libfoo.so.1"), "libs.soname", "WARN"),
     ("gl4es lib without gl4es licence", lambda r: lib(r, "libGL.so.1", folder="gl4es.aarch64"), "licenses.component", "WARN"),
     ("ini stick, no deadzone at all", lambda r: ini(r, "[config]\nmouse_delay = 16\n\n[controls]\nleft_analog_up = up\n"), "ini.deadzone", "INFO"),
+    # found in thedishwashervampiresmile
+    ("port asoundrc over the CFW's", both(write("testgame/asoundrc", 'pcm.!default {\n  type plug\n  slave.pcm "hw:rockchiprk817co,0"\n}\n'),
+                                          insert('[ -f "$HOME/.asoundrc" ] && cp "$HOME/.asoundrc" "$HOME/.asoundrc.bak"\ncp "$GAMEDIR/asoundrc" "$HOME/.asoundrc"\n')), "sh.asoundrc", "WARN"),
+    ("system GLES lib as GL driver", insert("export SDL_VIDEO_GL_DRIVER=libGLESv2.so\n"), "sh.gl-driver-gles", "INFO"),
+    ("pm_message, sleep, exit", insert('if [ ! -f data.pak ]; then\n  pm_message "data.pak missing"\n  sleep 15\n  exit 1\nfi\n'), "sh.error-message", "INFO"),
+    ("pm_message, pm_finish, exit", insert('if [ ! -f data.pak ]; then\n  pm_message "data.pak missing"\n  pm_finish\n  exit 1\nfi\n'), "sh.error-message", "INFO"),
+    ("shipped XNA content", write("testgame/patches/sprites.xnb", b"XNBw\x05\x01"), "files.game-content", "INFO"),
 ]
 
 # (name, change): valid ways of writing a port; must add no ERROR or WARN
@@ -328,6 +335,9 @@ VALID = [
                             lambda r: pj(r, _items=["Test Game.sh", "Test Game MP.sh", "testgame"]))),
     ("kill between launcher and game", both(write("testgame/launcher.gptk", "back = esc\nstart = enter\n"),
                                             insert('$GPTOKEYB "love" -c "$GAMEDIR/launcher.gptk" &\n$LOVE_RUN launcher\n$ESUDO pkill -9 -f "gptokeyb"\n'))),
+    ("ArkOS asoundrc restored from the CFW backup", insert('if [ ! -f ~/.asoundrc ] && [ -f ~/.asoundrcbak ]; then\n  $ESUDO cp ~/.asoundrcbak ~/.asoundrc\nfi\n')),
+    ("asoundrc created only when the CFW has none", insert('if [ ! -f "${HOME}/.asoundrc" ]; then\n  printf "pcm.!default { type plug }\\n" > "${HOME}/.asoundrc"\nfi\n')),
+    ("own XNA content in the game's data folder", write("testgame/gamedata/Content/font.xnb", b"XNBw")),
     ("tar data with guard", insert('ARCHIVE_FILE="gamedata.tar.gz"\nif [[ -f "$ARCHIVE_FILE" ]]; then\n'
                                    '    pm_message "Extracting" --title "Please wait"\n'
                                    '    if ! gunzip -c "$ARCHIVE_FILE" | tar --no-same-owner -xf -; then\n'
@@ -384,6 +394,36 @@ class Mutations(unittest.TestCase):
                 mutate(t)
                 got = {(f.rule, f.severity) for f in findings(t)}
                 self.assertIn((rule, sev), got, f"{name}: expected {rule} {sev}, got {sorted(got)}")
+
+
+class ShellcheckFindings(unittest.TestCase):
+    def test_shellcheck_findings_do_not_crash_the_script_check(self):
+        """the shellcheck loop once reused the name of the script's line list, and every later check crashed"""
+        from unittest import mock
+        import pmcheck.rules as rules
+        real_which, real_run = shutil.which, rules._run
+        sc = json.dumps([{"code": 2242, "message": "Can only exit with status 0-255.", "line": 3}])
+        with tempfile.TemporaryDirectory() as t, \
+                mock.patch.object(rules.shutil, "which", lambda n, *a, **k: "/usr/bin/shellcheck" if n == "shellcheck" else real_which(n, *a, **k)), \
+                mock.patch.object(rules, "_run", lambda cmd: sc if cmd[0] == "shellcheck" else real_run(cmd)):
+            make_port(t)
+            got = {f.rule for f in findings(t)}
+        self.assertIn("sh.shellcheck", got)
+        self.assertFalse([r for r in got if r.startswith("internal.")], sorted(got))
+
+
+class ImageSize(unittest.TestCase):
+    def test_jpeg_size_without_pil(self):
+        from unittest import mock
+        import builtins
+        from pmcheck.rules import image_size
+        real_import = builtins.__import__
+        jpg = b"\xff\xd8" + b"\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00" + b"\xff\xc0\x00\x11\x08\x03\xc0\x05\x00\x03" + b"\x00" * 9 + b"\xff\xd9"
+        with tempfile.TemporaryDirectory() as t, mock.patch.object(builtins, "__import__",
+                lambda name, *a, **k: (_ for _ in ()).throw(ImportError()) if name == "PIL" else real_import(name, *a, **k)):
+            p = Path(t) / "screenshot.jpg"
+            p.write_bytes(jpg)
+            self.assertEqual(tuple(image_size(p)), (1280, 960))
 
 
 class ArmhfNote(unittest.TestCase):

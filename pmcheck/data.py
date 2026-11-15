@@ -114,3 +114,6 @@ PM_ENV_PREFIX = ("SDL_", "LIBGL_", "XDG_", "MESA_", "MONO_", "DOTNET_", "PULSE_"
 
 # Normalized launch-script lines found in >= min_scripts merged PortMaster-New scripts (tools/build_script_lines.py)
 SCRIPT_LINES = json.loads((Path(__file__).parent / "script_lines.json").read_text())
+
+# a game's own content formats; a port shipping them is usually redistributing edited game data
+GAME_CONTENT_EXT = {".xnb", ".xwb", ".xsb", ".xgs"}
