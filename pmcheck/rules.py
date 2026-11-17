@@ -628,9 +628,11 @@ def _sdl3_gpu_use(port):
 def binaries(port):
     scripts_all = "\n".join(script_text(port, s) for s in port.scripts)
     bundled = {}
+    libfiles = []   # every shared library file; bundled maps names, so libs.aarch64/x.so and libs.armhf/x.so share a key
     for p, info in elves(port):
         if info["type"] == "DYN" and (".so" in p.name):
             bundled[p.name] = p
+            libfiles.append(p)
             if info["soname"]:
                 bundled.setdefault(info["soname"], p)
     # byte-identical copies of one library (libfoo.so + libfoo.so.1.2): libs.duplicate covers the SONAME pair
@@ -655,9 +657,9 @@ def binaries(port):
         yield Finding("libs.identical", WARN, f"Identical copies of one library: {names}; {keep}.", file=port.rel(group[0]),
                       fix="Delete the extra copies.")
     x11_done = False
-    for name, p in sorted(bundled.items()):
-        if p.name != name:
-            continue
+    common = {}
+    for p in sorted(libfiles, key=lambda x: port.rel(x)):
+        name = p.name
         rel = port.rel(p)
         if data.GL_LIBS.match(name) and not _in_gl4es(p):
             yield Finding("libs.banned", ERROR, f"{rel}: libGL/libEGL outside a gl4es.<arch>/ folder.", file=rel)
@@ -685,8 +687,7 @@ def binaries(port):
         # a fallback/ folder is only linked when the CFW lacks the library (runtime.src find_library pattern)
         for rx in data.COMMON_LIBS if "fallback" not in p.parent.name.lower() else ():
             if rx.match(name):
-                yield Finding("libs.common", WARN, f"{rel} is near-universal on CFW images; bundling only bloats the port.", file=rel,
-                              fix="Remove it and test on device; add back only if a device reports it missing.")
+                common.setdefault(name, []).append(p)
         so = elf_info(p)["soname"]
         if so and p.name != so and p.name not in scripts_all and not _named_elsewhere(port, p):
             if (p.parent / so).exists():
@@ -695,6 +696,11 @@ def binaries(port):
                 yield Finding("libs.duplicate", WARN, f"{rel} duplicates {so} in the same folder; ship only {so}.", file=rel, fix="Delete it.")
             else:
                 yield Finding("libs.soname", WARN, f"{rel} should be named after its SONAME {so!r}.", file=rel)
+    if common:
+        first = min((p for ps in common.values() for p in ps), key=lambda x: port.rel(x))
+        folders = sorted({port.rel(p.parent) for ps in common.values() for p in ps})
+        yield Finding("libs.common", WARN, f"{', '.join(sorted(common))} (in {', '.join(folders)}) are near-universal on CFW images; bundling them only bloats the port.",
+                      file=port.rel(first), fix="Remove them and test on device; add back only what a device reports missing.")
     pj = json_load(port)
     rts = " ".join(map(str, ((pj.get("attr") or {}).get("runtime") or []) if isinstance(pj, dict) else [])) + " " + scripts_all
     provided = list(data.CFW_PROVIDED)
@@ -1224,8 +1230,10 @@ def _script(port, s):
         except ValueError:
             pass
     if not re.search(r"gptokeyb", body, re.I):
-        yield Finding("sh.no-gptokeyb", ERROR, "No gptokeyb launched, so there is no hotkey exit (Select+Start).", file=f,
-                      fix='Launch it before the game, e.g. $GPTOKEYB2 "$BINARY" & (no -c needed for the kill switch alone), or $GPTOKEYB "$BINARY" &.')
+        yield Finding("sh.no-gptokeyb", ERROR, "No gptokeyb launched, so there is no hotkey exit. A game that quits on Select+Start itself still misses devices whose "
+                      "hotkey is another button (control.txt sets $HOTKEY: L3 on the OGA 1.0 and Gameforce Chi, Guide on the RGB10 Max with ArkOS), and can't be "
+                      "killed when it hangs.", file=f,
+                      fix='Launch it before the game, e.g. $GPTOKEYB2 "$BINARY" & (no -c: kill switch only, a game reading the pad itself keeps working), or $GPTOKEYB "$BINARY" &.')
     for n, l in grep(r"\b(kill\b.*\$\(\s*pidof\s+gptokeyb|pkill\b.*gptokeyb|killall\b.*gptokeyb)"):
         i = next(k for k, (m, _) in enumerate(code) if m == n)
         after_patcher = any("patcher.txt" in x for x in [x for _, x in code[:i] if x.strip()][-1:])

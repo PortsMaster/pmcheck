@@ -425,6 +425,17 @@ class ImageSize(unittest.TestCase):
             self.assertEqual(tuple(image_size(p)), (1280, 960))
 
 
+class PerArchLibs(unittest.TestCase):
+    def test_same_library_name_in_two_arch_folders_is_checked_in_both(self):
+        """libs.aarch64/x.so and libs.armhf/x.so once shared one entry, so only the last folder was checked"""
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            lib(t, "libGL.so.1", fixture="libfoo.so.1")
+            lib(t, "libGL.so.1", folder="libs.armhf", fixture="libfoo.so.1")
+            got = sorted(f.file for f in findings(t) if f.rule == "libs.banned")
+        self.assertEqual(got, ["testgame/libs.aarch64/libGL.so.1", "testgame/libs.armhf/libGL.so.1"])
+
+
 class ArmhfNote(unittest.TestCase):
     def rules(self, extra):
         with tempfile.TemporaryDirectory() as t:
