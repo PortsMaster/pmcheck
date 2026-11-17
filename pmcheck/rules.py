@@ -1146,21 +1146,7 @@ def _script(port, s):
         if (nxt is not None and re.match(r"\s*exit\s+[1-9]", nxt)
                 and not any(re.search(r"\bpm_(message|show_error)\b", x) for x in near)):
             yield Finding("sh.echo-message", WARN, "This message goes to the log, the player never sees it before the exit.", file=f, line=n,
-                          fix='pm_show_error "..." --title "..."   (or pm_message on older templates)')
-    timed = []
-    for i, (n, l) in enumerate(code):
-        if not re.match(r"\s*pm_message\b", l) or re.search(r"PortMaster", l):
-            continue   # "needs a newer PortMaster": an old one may not have pm_show_error
-        for _, x in code[i + 1:i + 5]:
-            if re.match(r"\s*$|\s*(sleep\s|pm_finish\b)", x):
-                continue
-            if re.match(r"\s*exit\s+-?[1-9]", x):
-                timed.append(n)
-            break
-    if timed:
-        also = f" (also line{'s' if len(timed) > 2 else ''} {', '.join(map(str, timed[1:]))})" if len(timed) > 1 else ""
-        yield Finding("sh.error-message", INFO, f"pm_message right before an error exit{also}: a background card that closes on a timer or with the script, whether or not the player has read it.",
-                      file=f, line=timed[0], fix='pm_show_error "..." --title "..." waits for the player to press A; no sleep needed.')
+                          fix='pm_message "..." then sleep 5 before the exit (works on every PortMaster version)')
     home = r"(~|\$\{?HOME\}?)/\.asoundrc\b"
     for i, (n, l) in enumerate(code):
         m = re.search(r"\b(cp|mv|ln)\b[^;&|]*\s\"?" + home + r"\"?\s*$|>\s*\"?" + home, l)
@@ -1184,7 +1170,7 @@ def _script(port, s):
         if re.search(r"\\033c|\\e\[|\\033\[", l):
             continue   # clearing the console
         yield Finding("sh.tty-message", WARN, "Message written to the console TTY (old style); many CFWs show EmulationStation or nothing there.", file=f, line=n,
-                      fix='pm_show_error "..." --title "..."')
+                      fix='pm_message "..." then sleep 5 before the exit (works on every PortMaster version)')
         break
     for n, l in grep(r"\bpm_(message|show_error)\s+--"):
         yield Finding("sh.pm_message-order", ERROR, "pm_message/pm_show_error take the message first, options after.", file=f, line=n)

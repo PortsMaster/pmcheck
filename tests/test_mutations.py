@@ -235,8 +235,6 @@ MUTATIONS = [
     ("port asoundrc over the CFW's", both(write("testgame/asoundrc", 'pcm.!default {\n  type plug\n  slave.pcm "hw:rockchiprk817co,0"\n}\n'),
                                           insert('[ -f "$HOME/.asoundrc" ] && cp "$HOME/.asoundrc" "$HOME/.asoundrc.bak"\ncp "$GAMEDIR/asoundrc" "$HOME/.asoundrc"\n')), "sh.asoundrc", "WARN"),
     ("system GLES lib as GL driver", insert("export SDL_VIDEO_GL_DRIVER=libGLESv2.so\n"), "sh.gl-driver-gles", "INFO"),
-    ("pm_message, sleep, exit", insert('if [ ! -f data.pak ]; then\n  pm_message "data.pak missing"\n  sleep 15\n  exit 1\nfi\n'), "sh.error-message", "INFO"),
-    ("pm_message, pm_finish, exit", insert('if [ ! -f data.pak ]; then\n  pm_message "data.pak missing"\n  pm_finish\n  exit 1\nfi\n'), "sh.error-message", "INFO"),
     ("shipped XNA content", write("testgame/patches/sprites.xnb", b"XNBw\x05\x01"), "files.game-content", "INFO"),
 ]
 
@@ -338,6 +336,7 @@ VALID = [
     ("ArkOS asoundrc restored from the CFW backup", insert('if [ ! -f ~/.asoundrc ] && [ -f ~/.asoundrcbak ]; then\n  $ESUDO cp ~/.asoundrcbak ~/.asoundrc\nfi\n')),
     ("asoundrc created only when the CFW has none", insert('if [ ! -f "${HOME}/.asoundrc" ]; then\n  printf "pcm.!default { type plug }\\n" > "${HOME}/.asoundrc"\nfi\n')),
     ("own XNA content in the game's data folder", write("testgame/gamedata/Content/font.xnb", b"XNBw")),
+    ("pm_message, sleep, exit", insert('if [ ! -f data.pak ]; then\n  pm_message "data.pak missing"\n  sleep 10\n  pm_finish\n  exit 1\nfi\n')),
     ("tar data with guard", insert('ARCHIVE_FILE="gamedata.tar.gz"\nif [[ -f "$ARCHIVE_FILE" ]]; then\n'
                                    '    pm_message "Extracting" --title "Please wait"\n'
                                    '    if ! gunzip -c "$ARCHIVE_FILE" | tar --no-same-owner -xf -; then\n'
