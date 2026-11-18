@@ -119,3 +119,5 @@ SCRIPT_LINES = json.loads((Path(__file__).parent / "script_lines.json").read_tex
 
 # a game's own content formats; a port shipping them is usually redistributing edited game data
 GAME_CONTENT_EXT = {".xnb", ".xwb", ".xsb", ".xgs"}
+
+MARKDOWN_GENERATOR = "https://portmaster.games/tools/markdown-generator/"

@@ -235,6 +235,10 @@ MUTATIONS = [
     ("port asoundrc over the CFW's", both(write("testgame/asoundrc", 'pcm.!default {\n  type plug\n  slave.pcm "hw:rockchiprk817co,0"\n}\n'),
                                           insert('[ -f "$HOME/.asoundrc" ] && cp "$HOME/.asoundrc" "$HOME/.asoundrc.bak"\ncp "$GAMEDIR/asoundrc" "$HOME/.asoundrc"\n')), "sh.asoundrc", "WARN"),
     ("system GLES lib as GL driver", insert("export SDL_VIDEO_GL_DRIVER=libGLESv2.so\n"), "sh.gl-driver-gles", "INFO"),
+    # found in kye (PR 2870)
+    ("game output to its own file", insert('"$GAMEDIR/testgame.aarch64" > "$PWD/run.txt" 2>&1\n'), "sh.log-split", "WARN"),
+    ("big true-colour bmp", write("testgame/splash.bmp", b"BM" + b"\x00" * 26 + b"\x18\x00" + b"\x00" * (300 * 1024)), "files.bmp", "INFO"),
+    ("README with a title heading and <br/>", write("testgame/README.md", "## Testgame\nThanks to someone!\n<br/>\n\n## Controls\n\n| Button | Action |\n"), "readme.layout", "INFO"),
     ("shipped XNA content", write("testgame/patches/sprites.xnb", b"XNBw\x05\x01"), "files.game-content", "INFO"),
 ]
 
@@ -337,6 +341,8 @@ VALID = [
     ("asoundrc created only when the CFW has none", insert('if [ ! -f "${HOME}/.asoundrc" ]; then\n  printf "pcm.!default { type plug }\\n" > "${HOME}/.asoundrc"\nfi\n')),
     ("own XNA content in the game's data folder", write("testgame/gamedata/Content/font.xnb", b"XNBw")),
     ("pm_message, sleep, exit", insert('if [ ! -f data.pak ]; then\n  pm_message "data.pak missing"\n  sleep 10\n  pm_finish\n  exit 1\nfi\n')),
+    ("stderr captured for the error message", insert('./testgame.aarch64 --install 2> install.err\nERROR=$(sed "s/^x//" install.err)\n')),
+    ("game output teed to a second file", insert('./testgame.aarch64 > >(tee "$GAMEDIR/server.log") 2>&1 &\n')),
     ("tar data with guard", insert('ARCHIVE_FILE="gamedata.tar.gz"\nif [[ -f "$ARCHIVE_FILE" ]]; then\n'
                                    '    pm_message "Extracting" --title "Please wait"\n'
                                    '    if ! gunzip -c "$ARCHIVE_FILE" | tar --no-same-owner -xf -; then\n'

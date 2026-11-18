@@ -502,6 +502,16 @@ def readme(port):
     if missing:
         yield Finding("readme.missing-file", WARN, f"The README refers to {', '.join(missing)}, which the package does not contain; nobody can repeat the build without it.",
                       file=port.rel(p), fix=f"Ship it (patches go in {port.gamedir.name if port.gamedir else '<gamedir>'}/patches/) or link where to get it.")
+    issues = []
+    first = re.search(r"^#{1,3}\s*(.+?)\s*#*$", text, re.M)
+    if first and not re.match(r"(notes|controls|compile|build)", first.group(1).strip(), re.I):
+        issues.append(f"it starts with '{first.group(0).strip()}' instead of '## Notes'")
+    tags = sorted({t.lower() for t in re.findall(r"<(br|div|p|center|font|span|img)\b", text, re.I)})
+    if tags:
+        issues.append("it uses HTML (" + ", ".join(f"<{t}>" for t in tags) + ")")
+    if issues:
+        yield Finding("readme.layout", INFO, f"README doesn't follow the template: {'; '.join(issues)}.", file=port.rel(p),
+                      fix=f"## Notes / ## Controls / ## Compile in plain markdown; {data.MARKDOWN_GENERATOR} builds one.")
     for h in need:
         alt = ("compile", "build", "building") if h == "compile" else (h,)
         if not any(x.startswith(alt) for x in heads):
@@ -558,6 +568,25 @@ def game_content(port):
         yield Finding("files.game-content", INFO, f"Ships files in the game's own content format ({names}). If they are made from the game's files "
                       "(recoloured sprites, edited fonts or sounds), they can't be redistributed.",
                       file=port.rel(hits[0]), fix="Ask where they come from; build them on device from the player's copy at first launch, or ship a binary diff (xdelta) instead.")
+
+
+@check
+def bitmaps(port):
+    """Uncompressed 24/32-bit .bmp files: a 640x480 one is 900 KB where a PNG is a fraction of it."""
+    big = []
+    for f in port.files():
+        if f.suffix.lower() != ".bmp" or (port.gamedir and "gamedata" in port.rel(f).split("/")[1:-1]):
+            continue
+        try:
+            head = f.read_bytes()[:32]
+        except OSError:
+            continue
+        if head[:2] == b"BM" and len(head) >= 30 and struct.unpack("<H", head[28:30])[0] >= 24 and f.stat().st_size > 256 * 1024:
+            big.append(f)
+    if big:
+        names = ", ".join(f"{port.rel(f)} ({f.stat().st_size // 1024} KB)" for f in big[:4])
+        yield Finding("files.bmp", INFO, f"Uncompressed true-colour bitmap{'s' if len(big) > 1 else ''}: {names}.", file=port.rel(big[0]),
+                      fix="Use PNG if whatever loads it reads PNG, otherwise an 8-bit indexed BMP.")
 
 
 @check
@@ -1153,6 +1182,20 @@ def _script(port, s):
                 and not any(re.search(r"\bpm_(message|show_error)\b", x) for x in near)):
             yield Finding("sh.echo-message", WARN, "This message goes to the log, the player never sees it before the exit.", file=f, line=n,
                           fix='pm_message "..." then sleep 5 before the exit (works on every PortMaster version)')
+    launch = re.compile(r"^\s*(?:\w+=\S+\s+)*(?:\$\{?TASKSET\}?\s+|\$ESUDO\s+)?(?:\"?\$\{?GAMEDIR\}?/|\./|\"?\$\{?BINARY\}?\b|mono\b|java\b|\$\{?LOVE_RUN\}?|\$\{?GMLOADER\}?)")
+    for n, l in code:
+        if not launch.match(l):
+            continue
+        for m in re.finditer(r"(?:^|\s)(?:[12&]?>>?)\s*\"?([^\"\s;&|)]+)", l):
+            target = m.group(1)
+            if re.search(r"^/dev/(null|tty|std)|(^|/)log\.txt$|^>?\(", target):
+                continue   # process substitution (> >(tee ...)) still reaches the log
+            base = re.escape(target.rsplit("/", 1)[-1])
+            if any(re.search(r"\b(cat|sed|grep|awk|tail|head|read)\b.*" + base + r"|<\s*\"?\S*" + base, x) for k, x in code if k > n):
+                continue   # captured on purpose and read back (e.g. into an error message)
+            yield Finding("sh.log-split", WARN, f"The game's output goes to {target} instead of log.txt; testers send log.txt, so errors from the game itself are missing from it.",
+                          file=f, line=n, fix="Drop the redirection; the template's exec > >(tee \"$GAMEDIR/log.txt\") 2>&1 already logs everything.")
+            break
     home = r"(~|\$\{?HOME\}?)/\.asoundrc\b"
     for i, (n, l) in enumerate(code):
         m = re.search(r"\b(cp|mv|ln)\b[^;&|]*\s\"?" + home + r"\"?\s*$|>\s*\"?" + home, l)
