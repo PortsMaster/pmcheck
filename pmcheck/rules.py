@@ -223,7 +223,7 @@ def required_files(port):
             yield Finding("files.cover-location", WARN, f"{port.rel(c)} is in the wrong place; cover.png goes {where}.", file=port.rel(c))
     if port.gamedir is not None:
         lic = [d for d in port.gamedir.iterdir() if d.is_dir() and d.name.lower() in ("licenses", "license", "licences", "licence")]
-        loose = [f for f in port.gamedir.iterdir() if f.is_file() and re.search(r"licen[cs]e|copying", f.name, re.I)]
+        loose = [f for f in port.gamedir.iterdir() if f.is_file() and (re.search(r"licen[cs]e|copying|eula", f.name, re.I) or GENERIC_LICENCE.match(f.name))]
         if not lic and loose:
             yield Finding("licenses.folder", WARN, "Licence files sit loose in the game folder (" + ", ".join(f.name for f in loose) + "); move them into licenses/.")
         elif not lic:
@@ -930,7 +930,7 @@ def licences(port):
                           fix=f"Add {port.rel(lic)}/LICENSE.{name}.")
 
 
-GENERIC_LICENCE = re.compile(r"^(licen[cs]e|copying|eula|permission)s?(\.(txt|md))?$", re.I)
+GENERIC_LICENCE = re.compile(r"^(licen[cs]e|copying|eula|permission|copyright|[al]?gpl(-?v?[23](\.0)?)?|mit|bsd|zlib|unlicense)s?(\.(txt|md))?$", re.I)
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
 
@@ -943,6 +943,16 @@ def _game_licence(port, lic, attr):
     keys = {port.gamedir.name.lower(), re.sub(r"[^a-z0-9]", "", str(attr.get("title", "")).lower())}
     keys |= {w for w in re.findall(r"[a-z0-9]{4,}", str(attr.get("title", "")).lower())}
     keys |= {"game", "permission", "eula"}
+    # what the port bundles: a loose licence named after one of these is that component's, not the game's
+    components = {re.sub(r"^lib", "", p.name.lower()).split(".")[0] for p, _ in elves(port, host_only=False)}
+    components |= {"frt", "gl4es", "sdl", "sdl2", "godot", "love", "mono", "dotnet", "box64", "box86", "gmloader", "gmloadernext", "westonpack",
+                   "openal", "zlib", "png", "ogg", "vorbis", "freetype", "portmaster", "gptokeyb", "monogame", "fna", "renpy", "python"}
+    # the developer's name, from the store links (gunsandguns: LICENSE.yousfiwalid.txt)
+    for st in attr.get("store") or []:
+        for u in (st.get("developerurl"), st.get("gameurl")) if isinstance(st, dict) else ():
+            for w in re.findall(r"[a-z0-9]{4,}", re.sub(r"^https?://(www\.)?", "", str(u or "").lower())):
+                if w not in ("itch", "steampowered", "store", "https", "http", "html", "games", "gamejolt", "github", "com", "net", "org", "app", "apps"):
+                    keys.add(w)
     keys.discard("")
     for f in port.gamedir.rglob("*"):
         if not f.is_file() or any(p.startswith("libs.") for p in f.relative_to(port.gamedir).parts):
@@ -951,6 +961,14 @@ def _game_licence(port, lic, attr):
         name = f.name.lower()
         if GENERIC_LICENCE.match(name):
             return True
+        squashed = re.sub(r"[^a-z0-9]", "", name)
+        if re.search(r"licen[cs]e|copying|eula|permission", name) and any(k in squashed for k in keys):
+            return True   # turbotabletennis/turbotabletennis.license.txt: named after the game, wherever it sits
+        if f.parent == port.gamedir and re.search(r"licen[cs]e|copying|eula", name):
+            # loose in the game folder and named after nothing the port bundles (gunsandguns: LICENSE.yousfiwalid.txt)
+            words = {w for w in re.split(r"[^a-z0-9]+", name) if len(w) >= 3} - {"license", "licence", "licenses", "licences", "copying", "eula", "txt", "md"}
+            if words and not any(w in components or any(c.startswith(w) or w.startswith(c) for c in components if len(c) >= 3) for w in words):
+                return True
         if in_lic and (name.endswith(IMAGE_EXT) or any(k in re.sub(r"[^a-z0-9]", "", name) for k in keys)):
             return True
     return False
@@ -1557,6 +1575,16 @@ def _gptk_config(name, scripts):
     return name not in code
 
 
+def _gptk_unused(name, scripts):
+    """Certainly unused: every -c argument is a plain file name (no variables beyond $GAMEDIR) and this one is named nowhere."""
+    code = "\n".join(l for l in scripts.splitlines() if not l.strip().startswith("#"))
+    args = [m.group(1) for m in re.finditer(r"GPTOKEYB2?\}?\"?\s.*?\s-c\s+(\"[^\"]+\"|'[^']+'|\S+)", code)]
+    if not args or name in code:
+        return False
+    plain = [re.sub(r"\$\{?GAMEDIR\}?", "", a.strip("\"'")) for a in args]
+    return all("$" not in a and "`" not in a for a in plain)
+
+
 def _gptk_by_g2(name, scripts):
     """Is this .gptk started with $GPTOKEYB2 (gptokeyb2 reads the old format too, by its own rules)?"""
     stem = re.escape(name.rsplit(".", 1)[0])
@@ -1595,6 +1623,10 @@ def ini_files(port):
         yield from check_ini(text, port.rel(p), scripts)
     for p in sorted(port.gamedir.rglob("*.gptk")):
         text = port.read_text(p)
+        if _gptk_unused(p.name, scripts):
+            yield Finding("gptk.unused", INFO, f"{port.rel(p)} isn't passed to gptokeyb by the launch script, so its mappings never apply.",
+                          file=port.rel(p), fix="Delete it, or pass it with -c if it was meant to be used.")
+            continue
         if "[controls" in text:      # gptokeyb2 reads any file name; sections mean gptokeyb2 format
             yield from check_ini(text, port.rel(p), scripts)
         else:

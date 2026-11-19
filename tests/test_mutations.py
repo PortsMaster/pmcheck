@@ -578,6 +578,50 @@ class GptkPlaceholder(unittest.TestCase):
         self.assertEqual(g2, [("INFO", 1), ("WARN", 3), ("INFO", 4)])   # gptokeyb2 strips the quotes of "\\": a real backslash
 
 
+class GptkUnused(unittest.TestCase):
+    def test_alt_gptk_never_loaded(self):
+        """Farmner: altFarmner.gptk is never passed with -c; report it once instead of its keys"""
+        from pmcheck.rules import _gptk_unused
+        sh_ = '$GPTOKEYB "frt_3.5.2" -c "./Farmner.gptk" &\n'
+        self.assertTrue(_gptk_unused("altFarmner.gptk", sh_))
+        self.assertFalse(_gptk_unused("Farmner.gptk", sh_))
+        self.assertFalse(_gptk_unused("x.gptk", '$GPTOKEYB2 "$BINARY" -c "$GAMEDIR/$BINARY.gptk" &\n'))   # computed name: can't tell
+        self.assertFalse(_gptk_unused("alt.gptk", 'cp alt.gptk game.gptk\n$GPTOKEYB "g" -c "./game.gptk" &\n'))
+
+
+class GameLicenceByName(unittest.TestCase):
+    def test_licence_named_after_the_game_outside_licenses(self):
+        """turbotabletennis/turbotabletennis.license.txt next to the binary"""
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            for f in (gd(t) / "licenses").iterdir():
+                if "testgame" in f.name.lower():
+                    f.unlink()
+            (gd(t) / "testgame.license.txt").write_text("Free to redistribute.")
+            got = {f.rule for f in findings(t)}
+        self.assertNotIn("licenses.game", got)
+
+
+class GameLicenceLoose(unittest.TestCase):
+    def rules(self, files):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            (gd(t) / "licenses" / "LICENSE.testgame").unlink()
+            for n in files:
+                (gd(t) / n).write_text("licence")
+            return {f.rule for f in findings(t)}
+
+    def test_developer_named_licence(self):
+        """gunsandguns: LICENSE.yousfiwalid.txt; operius: GAME.LICENSE.txt"""
+        self.assertNotIn("licenses.game", self.rules(["LICENSE.yousfiwalid.txt"]))
+        self.assertNotIn("licenses.game", self.rules(["GAME.LICENSE.txt"]))
+        self.assertNotIn("licenses.game", self.rules(["gpl.txt"]))   # meritous
+
+    def test_component_licence_is_not_the_games(self):
+        self.assertIn("licenses.game", self.rules(["LICENSE.FRT.txt"]))
+        self.assertIn("licenses.game", self.rules(["gl4es.LICENSE"]))
+
+
 class SoTokens(unittest.TestCase):
     def test_same_names_as_the_regex(self):
         import re
