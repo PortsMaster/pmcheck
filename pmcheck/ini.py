@@ -34,7 +34,7 @@ def check_ini(text, f, scripts=""):
             continue
         if "=" not in s or sect is None:
             continue
-        s = re.sub(r"\s+#.*$", "", s)
+        s = re.sub(r"\s[;#].*$", "", s)   # inih: ; or # after whitespace starts an inline comment (ini.h INI_INLINE_COMMENT_PREFIXES)
         k, v = (x.strip() for x in s.split("=", 1))
         k = k.lower()
         if sect.startswith("[config"):
@@ -59,7 +59,7 @@ def check_ini(text, f, scripts=""):
             if prev in ("push_state", "set_state", "hold_state"):
                 prev = t
                 continue
-            ok = t in KEYS or t.lower() in KEYS_CI or (not q and t in SPECIAL)
+            ok = t in KEYS or t.lower() in KEYS_CI or t in SPECIAL   # gptokeyb2 strips the quotes first (tabulate_text)
             if not ok:
                 yield Finding("ini.key", ERROR, f'Unknown key "{t}" for {k} (gptokeyb2 ignores it, the button is dead).', file=f, line=n,
                               fix="Use a name from the gptokeyb2 key table (e.g. leftshift, enter, esc).")

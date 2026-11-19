@@ -1557,6 +1557,17 @@ def _gptk_config(name, scripts):
     return name not in code
 
 
+def _gptk_by_g2(name, scripts):
+    """Is this .gptk started with $GPTOKEYB2 (gptokeyb2 reads the old format too, by its own rules)?"""
+    stem = re.escape(name.rsplit(".", 1)[0])
+    for l in scripts.splitlines():
+        if l.strip().startswith("#") or not re.search(r"\s-c\s", l):
+            continue
+        if name in l or re.search(r"\$\{?BINARY\}?\.gptk", l) or re.search(stem, l):
+            return bool(re.search(r"GPTOKEYB2", l))
+    return False
+
+
 @check
 def ini_files(port):
     if port.gamedir is None:
@@ -1587,7 +1598,7 @@ def ini_files(port):
         if "[controls" in text:      # gptokeyb2 reads any file name; sections mean gptokeyb2 format
             yield from check_ini(text, port.rel(p), scripts)
         else:
-            yield from check_gptk(text, port.rel(p))
+            yield from check_gptk(text, port.rel(p), g2=_gptk_by_g2(p.name, scripts))
 
 
 def run_all(port):

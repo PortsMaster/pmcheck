@@ -28,7 +28,9 @@ NUMERIC = set("deadzone deadzone_scale deadzone_delay deadzone_y deadzone_x dead
 DEADZONE_MODES = {"axial", "radial", "scaled_radial", "sloped_axial", "sloped_scaled_axial", "hybrid", "default"}
 
 
-def check_gptk(text, f):
+def check_gptk(text, f, g2=False):
+    """g2: the file goes to gptokeyb2, which reads .gptk through inih (inline ; and # comments, quotes stripped)
+    and its own key table, and maps per-direction mouse_movement_* onto the whole stick or d-pad."""
     seen = {}
     lines = text.splitlines()
     for n, line in enumerate(lines, 1):
@@ -38,8 +40,12 @@ def check_gptk(text, f):
         if "=" not in s:
             yield Finding("gptk.syntax", WARN, f"Line is not 'button = key': {s[:40]!r}.", file=f, line=n)
             continue
+        if g2:
+            s = re.sub(r"\s[;#].*$", "", s)
         k, v = (x.strip() for x in s.split("=", 1))
-        v = re.split(r"\s+#", v, 1)[0].strip()   # "a = enter   # note": fscanf reads enter, then skips the '#...' line rest
+        v = re.split(r"\s+#", v, 1)[0].strip()
+        if g2 and v != EMPTY and len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+            v = v[1:-1]   # gptokeyb2's tabulate_text drops the quotes   # "a = enter   # note": fscanf reads enter, then skips the '#...' line rest
         if not re.fullmatch(r"\S+", k):
             yield Finding("gptk.syntax", WARN, f"Button name {k!r} contains spaces.", file=f, line=n)
             continue
@@ -50,6 +56,8 @@ def check_gptk(text, f):
         if len(v.split()) > 1:
             yield Finding("gptk.syntax", WARN, f"{k} = {v!r}: only the first word is read.", file=f, line=n)
         v = v.split()[0]
+        if len(v) >= 2 and '"' in v and re.fullmatch(r'["\\/]+', v):
+            v = EMPTY   # "\", \"", /" : typos of \" that match no key either (a lone " or \ is a real key)
         # `up = up` + `up = repeat` / `add_shift` is the normal way to add a flag, not a duplicate.
         if v not in EXTRA and v != EMPTY:
             if k in seen and k not in NUMERIC:
@@ -76,6 +84,17 @@ def check_gptk(text, f):
             continue
         if v in MOUSE_MOVE and (k in STICKS or k in ("up", "down", "left", "right")):
             continue
+        if g2:
+            from .ini import KEYS as G2_KEYS, KEYS_CI as G2_KEYS_CI, SPECIAL as G2_SPECIAL
+            if v in G2_KEYS or v.lower() in G2_KEYS_CI or v in G2_SPECIAL or re.match(r"mouse_(movement|absolute)_", v):
+                continue
+            yield Finding("gptk.key", ERROR, f'Unknown key "{v}" for {k} (gptokeyb2 ignores it, the button is dead).', file=f, line=n,
+                          fix='Use a name from the gptokeyb2 key table (e.g. enter, esc, leftshift), or \\" for no key.')
+            continue
         if v.lower() not in KEYS:
+            if len(v) > 2 and v[0] == v[-1] == '"' and v[1:-1].lower() in KEYS:
+                yield Finding("gptk.key", ERROR, f'{k} = {v}: classic gptokeyb ($GPTOKEYB) keeps the quotes as part of the key name, so the button is dead.', file=f, line=n,
+                              fix=f'{k} = {v[1:-1]} (or start the file with $GPTOKEYB2, which strips the quotes)')
+                continue
             yield Finding("gptk.key", ERROR, f'Unknown key "{v}" for {k} (classic gptokeyb maps it to nothing, the button is dead).', file=f, line=n,
                           fix='Use a name from gptokeyb\'s key table (e.g. enter, esc, leftshift), or \\" for no key.')

@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-10",
+ "updated": "2026-11-19",
  "keys": {
   "ags_3.6.squashfs": [
    "aarch64",
@@ -134,6 +134,9 @@
   "mono-6.12.0.122-aarch64.squashfs": [
    "aarch64"
   ],
+  "pmjs_v1.squashfs": [
+   "aarch64"
+  ],
   "python_3.11.squashfs": [
    "aarch64"
   ],
@@ -261,6 +264,7 @@
   "godot_4.7.1.x86_64.squashfs": "godot_4.7.1.squashfs",
   "mesa_pkg_0.1.squashfs": "mesa_pkg_0.1.squashfs",
   "mono-6.12.0.122-aarch64.squashfs": "mono-6.12.0.122-aarch64.squashfs",
+  "pmjs_v1.squashfs": "pmjs_v1.squashfs",
   "python_3.11.squashfs": "python_3.11.squashfs",
   "pyxel_2.2.8_python_3.11.squashfs": "pyxel_2.2.8_python_3.11.squashfs",
   "pyxel_2.2.8_python_3.11_x86_64.squashfs": "pyxel_2.2.8_python_3.11.squashfs",

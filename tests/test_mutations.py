@@ -528,6 +528,44 @@ class LicenceAlias(unittest.TestCase):
             self.assertEqual(got, [], name)
 
 
+class GptkNoKey(unittest.TestCase):
+    def test_quote_variants_mean_no_key(self):
+        """akeyspath: x = "\\" maps to no key in classic gptokeyb, like \\"; l2 = l2 is a real dead button"""
+        from pmcheck.gptk import check_gptk
+        got = [(f.rule, f.line) for f in check_gptk('x = "\\"\na = \\"\nl2 = l2\n', "t.gptk")]
+        self.assertEqual(got, [("gptk.key", 3)])
+
+
+class IniQuotedAction(unittest.TestCase):
+    def test_quoted_special_action(self):
+        """openmohaa: l1 = "mouse_slow" (gptokeyb2 strips quotes before matching); "return" is still no key"""
+        from pmcheck.ini import check_ini
+        got = [f.line for f in check_ini('[controls]\nl1 = "mouse_slow"\nback = return\n', "t.ini") if f.rule == "ini.key"]
+        self.assertEqual(got, [3])
+
+    def test_inline_comments(self):
+        """wargus: r2 = "shift"   ; Shift for queued commands (inih strips ; and # comments after whitespace)"""
+        from pmcheck.ini import check_ini
+        text = '[controls]\nr2 = "shift"   ; Shift for queued commands\nb = "h" ; harvest ; town hall;\ny = "p"   # Patrol\na = ";"\n'
+        self.assertEqual([f.message for f in check_ini(text, "t.ini") if f.rule == "ini.key"], [])
+
+
+class GptkByGptokeyb2(unittest.TestCase):
+    PP = 'a = "mouse_left"\nl1 = "mouse_slow"\nstart = "enter"\nr3 = \\"\nup = mouse_movement_up\ndown = \\" \nr2 = "shift"   ; queued commands\ndeadzone_mode = scaled_radial\n'
+
+    def test_papersplease_style_gptk_with_gptokeyb2(self):
+        """papersplease: quoted keys and \\" placeholders in a .gptk started with $GPTOKEYB2 are all valid"""
+        from pmcheck.rules import _gptk_by_g2
+        from pmcheck.gptk import check_gptk
+        self.assertTrue(_gptk_by_g2("PapersPlease.gptk", '$GPTOKEYB2 "$BINARY" -c "$GAMEDIR/$BINARY.gptk" &'))
+        self.assertEqual([f.message for f in check_gptk(self.PP, "t.gptk", g2=True) if f.severity == "ERROR"], [])
+
+    def test_quoted_keys_with_classic_gptokeyb(self):
+        from pmcheck.gptk import check_gptk
+        got = [f.line for f in check_gptk(self.PP, "t.gptk") if f.rule == "gptk.key"]
+        self.assertEqual(got, [1, 2, 3, 7])   # classic gptokeyb keeps the quotes, so every quoted value is dead
+
+
 class SoTokens(unittest.TestCase):
     def test_same_names_as_the_regex(self):
         import re
