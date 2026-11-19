@@ -532,8 +532,9 @@ class GptkNoKey(unittest.TestCase):
     def test_quote_variants_mean_no_key(self):
         """akeyspath: x = "\\" maps to no key in classic gptokeyb, like \\"; l2 = l2 is a real dead button"""
         from pmcheck.gptk import check_gptk
-        got = [(f.rule, f.line) for f in check_gptk('x = "\\"\na = \\"\nl2 = l2\n', "t.gptk")]
-        self.assertEqual(got, [("gptk.key", 3)])
+        got = [(f.rule, f.line) for f in check_gptk('x = "\\"\na = \\"\nl2 = l2\nb = \\\\\ny = /"\nr1 = "\n', "t.gptk")]
+        got = [x for x in got if x[0] != "gptk.placeholder"]
+        self.assertEqual(got, [("gptk.key", 3)])   # bugdom's \\\\ and /" are no key too; a lone " is a real key
 
 
 class IniQuotedAction(unittest.TestCase):
@@ -564,6 +565,17 @@ class GptkByGptokeyb2(unittest.TestCase):
         from pmcheck.gptk import check_gptk
         got = [f.line for f in check_gptk(self.PP, "t.gptk") if f.rule == "gptk.key"]
         self.assertEqual(got, [1, 2, 3, 7])   # classic gptokeyb keeps the quotes, so every quoted value is dead
+
+
+class GptkPlaceholder(unittest.TestCase):
+    def test_non_template_placeholders(self):
+        """bugdom: back = \\\\ unbinds like \\", but the template spells it \\" """
+        from pmcheck.gptk import check_gptk
+        text = 'back = \\\\\nstart = \\"\na = "\\"\nb = /"\n'
+        got = [(f.rule, f.severity, f.line) for f in check_gptk(text, "t.gptk")]
+        self.assertEqual(got, [("gptk.placeholder", "INFO", 1), ("gptk.placeholder", "INFO", 3), ("gptk.placeholder", "INFO", 4)])
+        g2 = [(f.severity, f.line) for f in check_gptk(text, "t.gptk", g2=True) if f.rule == "gptk.placeholder"]
+        self.assertEqual(g2, [("INFO", 1), ("WARN", 3), ("INFO", 4)])   # gptokeyb2 strips the quotes of "\\": a real backslash
 
 
 class SoTokens(unittest.TestCase):

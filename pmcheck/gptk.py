@@ -5,7 +5,7 @@ The parser reads `fscanf("%s = %s")` token pairs: one token per value, `\\"` mat
 """
 import re
 
-from .findings import Finding, ERROR, WARN
+from .findings import Finding, ERROR, WARN, INFO
 
 KEYS = set(
     "up down left right mouse_left mouse_right space esc end home shift leftshift rightshift ctrl leftctrl rightctrl "
@@ -44,6 +44,9 @@ def check_gptk(text, f, g2=False):
             s = re.sub(r"\s[;#].*$", "", s)
         k, v = (x.strip() for x in s.split("=", 1))
         v = re.split(r"\s+#", v, 1)[0].strip()
+        if g2 and v == '"\\"':
+            yield Finding("gptk.placeholder", WARN, f'{k} = "\\": gptokeyb2 strips the quotes and sends the backslash key; the template\'s "no key" is \\".',
+                          file=f, line=n, fix=f'{k} = \\"')
         if g2 and v != EMPTY and len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
             v = v[1:-1]   # gptokeyb2's tabulate_text drops the quotes   # "a = enter   # note": fscanf reads enter, then skips the '#...' line rest
         if not re.fullmatch(r"\S+", k):
@@ -56,8 +59,11 @@ def check_gptk(text, f, g2=False):
         if len(v.split()) > 1:
             yield Finding("gptk.syntax", WARN, f"{k} = {v!r}: only the first word is read.", file=f, line=n)
         v = v.split()[0]
-        if len(v) >= 2 and '"' in v and re.fullmatch(r'["\\/]+', v):
-            v = EMPTY   # "\", \"", /" : typos of \" that match no key either (a lone " or \ is a real key)
+        if len(v) >= 2 and re.fullmatch(r'["\\/]+', v) and v != EMPTY:
+            # "\", \"", /", \\ : match no key either (a lone ", \ or / is a real key), but aren't the template's \"
+            yield Finding("gptk.placeholder", INFO, f"{k} = {v} means no key, like \\\", but isn't the template's placeholder and reads like a real key.",
+                          file=f, line=n, fix=f'{k} = \\"')
+            v = EMPTY
         # `up = up` + `up = repeat` / `add_shift` is the normal way to add a flag, not a duplicate.
         if v not in EXTRA and v != EMPTY:
             if k in seen and k not in NUMERIC:
