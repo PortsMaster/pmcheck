@@ -14,8 +14,9 @@ from .model import load, LoadError
 from .rules import run_all
 
 
-def check_one(path, ai=False, pr=False):
+def check_one(path, ai=False, pr=False, pr_files=None):
     port = load(path, pr=pr)
+    port.pr_outside = pr_files or []   # files the pull request changes (pr.outside-ports)
     try:
         findings = run_all(port)
         ai_result = None
@@ -38,6 +39,7 @@ def main(argv=None):
     ap.add_argument("--summary", help="also append the markdown report to this file (e.g. $GITHUB_STEP_SUMMARY)")
     ap.add_argument("--pr", action="store_true", help="strict PortMaster-New PR layout (metadata next to the .sh)")
     ap.add_argument("--sweep", action="store_true", help="path is a folder of ports; print rule hit counts")
+    ap.add_argument("--pr-files", help="file listing every path the pull request changes, one per line (pr.outside-ports)")
     a = ap.parse_args(argv)
 
     if a.sweep:
@@ -65,8 +67,10 @@ def main(argv=None):
         try:
             info, dirs = ghpr.fetch(a.path, tmp, 2 << 30, log=lambda m: print(m, file=sys.stderr))
             rc = 0
+            listing = Path(tmp) / "pr-files.txt"
+            listing.write_text("\n".join(info.get("files", [])) + "\n")
             for d in dirs:
-                rc = max(rc, main([str(d), "--pr", "--format", a.format, "--prefix", f"ports/{d.name}/"]
+                rc = max(rc, main([str(d), "--pr", "--format", a.format, "--prefix", f"ports/{d.name}/", "--pr-files", str(listing)]
                                   + (["--ai"] if a.ai else []) + (["--warn-only"] if a.warn_only else [])))
             return rc
         except ghpr.PRError as e:
@@ -76,7 +80,8 @@ def main(argv=None):
             shutil.rmtree(tmp, ignore_errors=True)
 
     try:
-        name, findings, ai = check_one(a.path, a.ai, a.pr)
+        pr_files = [x for x in Path(a.pr_files).read_text().splitlines() if x.strip()] if a.pr_files else None
+        name, findings, ai = check_one(a.path, a.ai, a.pr, pr_files)
     except LoadError as e:
         print(f"pmcheck: {e}", file=sys.stderr)
         return 2

@@ -121,3 +121,6 @@ SCRIPT_LINES = json.loads((Path(__file__).parent / "script_lines.json").read_tex
 GAME_CONTENT_EXT = {".xnb", ".xwb", ".xsb", ".xgs"}
 
 MARKDOWN_GENERATOR = "https://portmaster.games/tools/markdown-generator/"
+
+# library name stem -> the project name its licence file is usually named after
+LIB_LICENCE_ALIASES = {"bz2": "bzip2", "crypto": "openssl", "ssl": "openssl", "lzma": "xz", "z": "zlib"}

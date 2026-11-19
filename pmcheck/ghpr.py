@@ -81,10 +81,12 @@ def fetch(url, dest, max_bytes, log=print):
     sha = head.get("sha") or ""
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo) or not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise PRError("The PR's source branch is gone (fork deleted?).")
-    names = []
+    names, changed = [], []
     for page in range(1, 31):
         files = _get(f"{API}/repos/{REPO}/pulls/{n}/files?per_page=100&page={page}")
         for f in files:
+            if f.get("status") != "removed":
+                changed.append(f["filename"])
             parts = f["filename"].split("/")
             if len(parts) >= 3 and parts[0] == "ports" and f.get("status") != "removed" and parts[1] not in names:
                 names.append(parts[1])
@@ -94,7 +96,7 @@ def fetch(url, dest, max_bytes, log=print):
         raise PRError(f"PR #{n} adds or changes no files under ports/.")
     if len(names) > MAX_PORTS:
         raise PRError(f"PR #{n} touches {len(names)} ports; the bot checks at most {MAX_PORTS}.")
-    info = {"number": n, "title": pr.get("title", ""), "state": pr.get("state", ""), "repo": repo, "sha": sha, "ports": names}
+    info = {"number": n, "title": pr.get("title", ""), "state": pr.get("state", ""), "repo": repo, "sha": sha, "ports": names, "files": changed}
     jobs, total = [], 0
     for name in names:
         if not SAFE_PART.match(name) or name in (".", ".."):

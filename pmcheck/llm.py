@@ -208,11 +208,19 @@ def review(port, findings, api_key=None, model=None, timeout=150):
     if fallback and fallback != model:
         models.append(fallback)
     resp = err = None
+    # PMCHECK_AI_BUDGET (seconds, set by the bot): stop retrying and trying models once it is spent
+    budget = os.environ.get("PMCHECK_AI_BUDGET", "")
+    stop = time.monotonic() + int(budget) if budget.isdigit() else None
+    code = None
     for m in models:
         for delay in RETRY_DELAYS:
+            left = stop - time.monotonic() - delay if stop else timeout
+            if left < 20:
+                err = err or "AI review skipped (time limit)."
+                break
             if delay:
                 time.sleep(delay)
-            resp, err, code = _call(m, body, api_key, timeout)
+            resp, err, code = _call(m, body, api_key, min(timeout, int(left)))
             if resp is not None or code not in RETRY_CODES or code == "timeout":
                 break
         if resp is not None or code not in RETRY_CODES:

@@ -240,10 +240,33 @@ MUTATIONS = [
     ("big true-colour bmp", write("testgame/splash.bmp", b"BM" + b"\x00" * 26 + b"\x18\x00" + b"\x00" * (300 * 1024)), "files.bmp", "INFO"),
     ("README with a title heading and <br/>", write("testgame/README.md", "## Testgame\nThanks to someone!\n<br/>\n\n## Controls\n\n| Button | Action |\n"), "readme.layout", "INFO"),
     ("shipped XNA content", write("testgame/patches/sprites.xnb", b"XNBw\x05\x01"), "files.game-content", "INFO"),
+    # found in hollowknight (PR 2880), teeworlds (PR 2881), ghostship, mazeburrow (PR 2877)
+    ("install signature on line 2", lambda r: sh(r, lambda s: s.replace("#!/bin/bash\n", "#!/bin/bash\n# PORTMASTER: testgame.zip, Test Game.sh\n", 1)), "sh.signature", "INFO"),
+    ("cd GAMEDIR || exit", lambda r: sh(r, lambda s: s.replace(HOOK, 'cd "$GAMEDIR" || exit 1\n', 1)), "sh.cd-exit", "INFO"),
+    ("32-bit program without PORT_32BIT", insert("LD_LIBRARY_PATH=/lib32:/usr/lib32 ./testgame.aarch64 --setup\n"), "sh.port-32bit", "WARN"),
+    ("PORT_32BIT after mod_", insert('export PORT_32BIT="Y"\nLD_LIBRARY_PATH=/lib32:/usr/lib32 ./testgame.aarch64 --setup\n'), "sh.port-32bit", "WARN"),
+    ("own 32-bit userland test", insert('[ -e /lib/ld-linux-armhf.so.3 ] && echo "32-bit libraries"\n'), "sh.has-armhf", "INFO"),
+    ("pm_finish before the game", insert('pm_finish\necho "now the game"\n'), "sh.pm-finish-mid", "WARN"),
+    ("EXIT trap without pm_message_end", insert('pm_message "Starting"\ntrap "rm -f $GAMEDIR/lock" EXIT\n'), "sh.trap-exit", "INFO"),
+    ("swap set up by the script", insert("$ESUDO swapon /dev/zram0\n"), "sh.swap", "INFO"),
+    ("swap in a sourced helper", both(write("testgame/swap.txt", "swap_on() {\n  $ESUDO mkswap /dev/zram1\n}\n"), insert('source "$GAMEDIR/swap.txt"\n')), "sh.swap", "INFO"),
+    ("long first-run helper", both(write("testgame/setup.py", "\n".join(f"print({i})" for i in range(320)) + "\n"), insert('python3 "$GAMEDIR/setup.py" --pending\n')), "sh.setup-helper", "INFO"),
+    ("two copies of one setup script", both(*(write(f"testgame/tools/{n}", "#!/bin/bash\n" + "".join(f'echo "step {i}: converting the game files, please wait"\n' for i in range(90)) + extra)
+                                              for n, extra in (("patchscript", "echo 32\n"), ("patchscript64", "echo 64\n")))), "files.duplicate-script", "INFO"),
+    ("ini with only [config] settings", lambda r: ini(r, "[config]\ndeadzone_mode = axial\ndeadzone = 2000\n\n[controls]\n"), "ini.empty", "INFO"),
 ]
 
 # (name, change): valid ways of writing a port; must add no ERROR or WARN
 VALID = [
+    ("PORT_32BIT before mod_ for a 32-bit route", both(lambda r: sh(r, lambda s: s.replace('[ -f "${controlfolder}/mod_', '[ "$ROUTE" = 32 ] && export PORT_32BIT="Y"\n[ -f "${controlfolder}/mod_', 1)),
+                                                   insert("LD_LIBRARY_PATH=/lib32:/usr/lib32 ./testgame.aarch64 --setup\n"))),
+    ("lib32 appended by a 64-bit runtime", insert('export LD_LIBRARY_PATH="$GAMEDIR/libs:/usr/lib32:$LD_LIBRARY_PATH"\n')),
+    ("cd || exit before libgl", both(write("testgame/libs.aarch64/.keep", ""), insert('cd "$GAMEDIR/data"\ncd "$GAMEDIR" || exit 1\nif [ -f "${controlfolder}/libgl_${CFW_NAME}.txt" ]; then\n  source "${controlfolder}/libgl_${CFW_NAME}.txt"\n'
+                                                                                  'else\n  source "${controlfolder}/libgl_default.txt"\nfi\n'))),
+    ("pm_finish then exit", insert('if [ ! -f x ]; then\n  pm_message "x is missing"\n  sleep 5\n  pm_finish\n  exit 1\nfi\n[ -f y ] || { pm_message "y"; pm_finish; exit 1; }\n')),
+    ("pm_finish ends one branch", insert('if [ -f mac ]; then\n  $GPTOKEYB2 "machismo" &\n  ./machismo\n  pm_finish\nelse\n  echo "linux build"\nfi\n')),
+    ("EXIT trap keeps pm_message_end", insert('pm_message "Starting"\ntrap "rm -f $GAMEDIR/lock; pm_message_end" EXIT\n')),
+
     ("quoted bind target with spaces", insert('mkdir -p "$GAMEDIR/savedata"\nbind_directories "$HOME/.local/share/Some Studio/Game" "$GAMEDIR/savedata"\n')),
     ("bind source via variable", insert('CONF="$GAMEDIR/conf/"\nmkdir -p "$GAMEDIR/conf"\nbind_directories ~/.thing "$CONF"\n')),
     ("bind source created by mkdir -p of a subfolder", insert('CONF="$GAMEDIR/conf/.game"\nmkdir -p "$CONF/save/slots"\nbind_directories ~/.game "$CONF"\n')),
@@ -464,10 +487,55 @@ class ArmhfNote(unittest.TestCase):
         self.assertNotIn(("port.json.arch", "WARN"), got)
         self.assertNotIn(("port.json.arch", "INFO"), got)
 
+    def test_armhf_next_to_aarch64_picked_by_the_script(self):
+        """a script that chooses the build by the 32-bit userland (and checks its glibc) needs no arch or min_glibc note"""
+        got = self.rules(lambda r: (shutil.copy(FIX / "hello.armhf", gd(r) / "testgame.armhf"),
+                                    sh(r, lambda s: s.replace(HOOK, HOOK + '[ "$DEVICE_HAS_ARMHF" = Y ] && /lib/ld-linux-armhf.so.3 --version\n', 1))))
+        self.assertNotIn(("port.json.arch", "INFO"), got)
+        self.assertNotIn(("port.json.min_glibc", "INFO"), got)
+
     def test_armhf_next_to_aarch64(self):
         got = self.rules(lambda r: shutil.copy(FIX / "hello.armhf", gd(r) / "testgame.armhf"))
         self.assertIn(("port.json.arch", "INFO"), got)
         self.assertNotIn(("port.json.arch", "WARN"), got)
+
+
+class PRScope(unittest.TestCase):
+    def test_runtime_in_the_port_pr(self):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t) / "testgame"
+            make_port(t)
+            to_pr(t)
+            port = load(t, pr=True)
+            port.pr_outside = ["ports/testgame/Test Game.sh", "runtimes/dotnet-6.0.36.aarch64.squashfs"]
+            try:
+                got = [f for f in run_all(port) if f.rule == "pr.outside-ports"]
+            finally:
+                port.cleanup()
+        self.assertEqual(len(got), 1)
+        self.assertIn("runtimes/dotnet-6.0.36.aarch64.squashfs", got[0].message)
+
+
+class LicenceAlias(unittest.TestCase):
+    def test_library_licence_under_the_project_name(self):
+        """libbz2 with LICENSE.bzip2.txt (ghostship), libcrypto with an OpenSSL licence"""
+        for name, licence in (("libbz2.so.1", "LICENSE.bzip2.txt"), ("libcrypto.so.1.1", "LICENSE.openssl.txt")):
+            with self.subTest(name), tempfile.TemporaryDirectory() as t:
+                make_port(t)
+                lib(t, name, fixture="libfoo.so.1", licence=False)
+                (gd(t) / "licenses" / licence).write_text("licence text")
+                got = [f.message for f in findings(t) if f.rule == "licenses.component"]
+            self.assertEqual(got, [], name)
+
+
+class SoTokens(unittest.TestCase):
+    def test_same_names_as_the_regex(self):
+        import re
+        from pmcheck.rules import so_tokens
+        rx = re.compile(rb"[\w.+\-]*\.so(?:\.[\w.]*)?(?![\w.\-])")
+        blob = (b"\x00libfoo.so.1\x00xx libbar-2.0.so\x00.so\x00libc++.so.6\x00also.something\x00libz.so.1.2.13 "
+                b"libx.so.2.so\x00notaso.sox\x00" + bytes(range(256)) * 50 + b"libend.so")
+        self.assertEqual(so_tokens(blob), set(rx.findall(blob)))
 
 
 class ValidVariants(unittest.TestCase):

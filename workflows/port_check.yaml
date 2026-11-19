@@ -14,7 +14,7 @@ permissions:
   pull-requests: read
 
 env:
-  PMCHECK_REF: v0.2.25        # pinned pmcheck tag
+  PMCHECK_REF: v0.2.26        # pinned pmcheck tag
   PMCHECK_WARN_ONLY: "true"  # set to "false" after the warn-only period
 
 jobs:
@@ -27,8 +27,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          dirs=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-                   --paginate --jq '.[].filename' | awk -F/ '$1=="ports" && NF>2 {print "ports/"$2}' | sort -u)
+          gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --paginate --jq '.[] | select(.status != "removed") | .filename' > "$RUNNER_TEMP/pr-files.txt"
+          dirs=$(awk -F/ '$1=="ports" && NF>2 {print "ports/"$2}' "$RUNNER_TEMP/pr-files.txt" | sort -u)
           echo "$dirs"
           { echo "dirs<<EOF"; echo "$dirs"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
@@ -59,6 +60,6 @@ jobs:
           [ "$PMCHECK_WARN_ONLY" = "true" ] && extra="--warn-only"
           while read -r d; do
             [ -d "$d" ] || { echo "$d removed, skipping"; continue; }
-            pmcheck "$d" --pr --format github --prefix "$d/" --summary "$GITHUB_STEP_SUMMARY" $extra || rc=1
+            pmcheck "$d" --pr --format github --prefix "$d/" --summary "$GITHUB_STEP_SUMMARY" --pr-files "$RUNNER_TEMP/pr-files.txt" $extra || rc=1
           done <<< "$DIRS"
           exit $rc

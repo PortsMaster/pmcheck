@@ -2,7 +2,8 @@
 
 Env (see config.example.env):
   DISCORD_TOKEN, GUILD_ID, ADMIN_ROLE_IDS (comma separated), GEMINI_API_KEY,
-  PMCHECK_GEMINI_MODEL (optional), MAX_DOWNLOAD_MB (default 1024), CHECK_TIMEOUT (default 900),
+  PMCHECK_GEMINI_MODEL (optional), MAX_DOWNLOAD_MB (default 1024),
+  CHECK_DEADLINE (default 780: seconds for download + checks; Discord drops the reply after 15 minutes),
   GITHUB_TOKEN (read-only; PR links download each file through the GitHub API, raw downloads get HTTP 429)
 """
 import asyncio
@@ -30,7 +31,8 @@ TOKEN = os.environ["DISCORD_TOKEN"]
 GUILD = discord.Object(id=int(os.environ["GUILD_ID"]))
 ADMIN_ROLES = {int(x) for x in os.environ.get("ADMIN_ROLE_IDS", "").split(",") if x.strip()}
 MAX_BYTES = int(os.environ.get("MAX_DOWNLOAD_MB", "1024")) * 1024 * 1024
-TIMEOUT = int(os.environ.get("CHECK_TIMEOUT", "900"))
+DEADLINE = min(int(os.environ.get("CHECK_DEADLINE", "780")), 840)   # the interaction token lasts 15 minutes
+RULES_RESERVE = 90   # seconds kept back for a rules-only run when the AI review runs out of time
 
 intents = discord.Intents.none()
 intents.guilds = True
@@ -77,22 +79,40 @@ async def download(url, dest):
             return size
 
 
-async def run_pmcheck(zip_path, fmt, workdir, pr=False):
+async def run_pmcheck(zip_path, fmt, workdir, pr=False, ai=True, budget=600, pr_files=None):
     # TMPDIR inside the per-check folder: even a killed check leaves nothing outside it.
-    env = dict(os.environ, TMPDIR=str(workdir))
+    env = dict(os.environ, TMPDIR=str(workdir), PMCHECK_AI_BUDGET=str(max(0, int(budget) - 30)))
+    args = [str(zip_path), "--format", fmt, "--warn-only", *(["--ai"] if ai else []), *(["--pr"] if pr else []),
+            *(["--pr-files", str(pr_files)] if pr_files else [])]
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-I", "-m", "pmcheck", str(zip_path), "--format", fmt, "--ai", "--warn-only", *(["--pr"] if pr else []),
+        sys.executable, "-I", "-m", "pmcheck", *args,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env,
     )
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), TIMEOUT)
+        out, err = await asyncio.wait_for(proc.communicate(), max(budget, 10))
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        raise ValueError(f"check timed out after {TIMEOUT}s")
+        raise TimeoutError(f"check timed out after {int(budget)}s")
     if proc.returncode not in (0, 1):
         raise ValueError(err.decode(errors="replace").strip()[-500:] or "pmcheck failed")
     return out.decode(errors="replace")
+
+
+async def check_target(target, workdir, pr, end, pr_files=None):
+    """Rules + AI review within the time left; when that runs out, the rules alone (they take seconds)."""
+    left = end - time.monotonic()
+    if left > RULES_RESERVE + 60:
+        try:
+            return json.loads(await run_pmcheck(target, "json", workdir, pr=pr, budget=left - RULES_RESERVE, pr_files=pr_files))
+        except TimeoutError as e:
+            log(f"  {e}; running the rules without the AI review")
+    left = end - time.monotonic()
+    if left < 15:
+        raise ValueError("no time left for the check")
+    result = json.loads(await run_pmcheck(target, "json", workdir, pr=pr, ai=False, budget=left, pr_files=pr_files))
+    result["ai"] = "AI review skipped (time limit)."
+    return result
 
 
 @tree.command(name="checkport", description="Check a PortMaster port zip against the packaging guidelines", guild=GUILD)
@@ -120,24 +140,29 @@ async def checkport(inter: discord.Interaction, url: str):
         tmp = Path(tempfile.mkdtemp(prefix="pmbot-"))
         try:
             t0 = time.monotonic()
+            end = t0 + DEADLINE
+            pr_files = None
             if prn:
-                info, targets = await asyncio.to_thread(ghpr.fetch, url, tmp / "ports", MAX_BYTES, log)
+                info, targets = await asyncio.wait_for(asyncio.to_thread(ghpr.fetch, url, tmp / "ports", MAX_BYTES, log), DEADLINE / 2)
                 title = f"PR #{prn}: {info['title']}" + ("" if info["state"] == "open" else f" ({info['state']})")
+                pr_files = tmp / "pr-files.txt"
+                pr_files.write_text("\n".join(info.get("files", [])) + "\n")
             else:
                 targets, title = [tmp / "port.zip"], None
                 size = await download(url, targets[0])
             log(f"  downloaded in {time.monotonic() - t0:.0f}s; running rules + AI review")
             results, mds = [], []
-            for target in targets:
+            for i, target in enumerate(targets):
                 t1 = time.monotonic()
-                result = json.loads(await run_pmcheck(target, "json", tmp, pr=bool(prn)))
+                share = end - (end - t1) * (len(targets) - i - 1) / (len(targets) - i)   # split what is left between the ports
+                result = await check_target(target, tmp, bool(prn), share, pr_files)
                 results.append(result)
                 mds.append(await run_pmcheck_md_from(result))
                 c = result["counts"]
                 ai = result.get("ai")
                 ai_state = f"{len(ai)} AI notes" if isinstance(ai, list) else (ai or "no AI")
                 log(f"  {result['port']} done in {time.monotonic() - t1:.0f}s: {c['ERROR']} errors, {c['WARN']} warnings, {c['INFO']} notes; {ai_state}")
-        except (ValueError, aiohttp.ClientError, json.JSONDecodeError) as e:
+        except (ValueError, TimeoutError, asyncio.TimeoutError, aiohttp.ClientError, json.JSONDecodeError) as e:
             log(f"  failed: {e}")
             await inter.followup.send(f"❌ Check failed: {e}")
             return

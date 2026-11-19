@@ -1,4 +1,5 @@
 """All checks. Each check takes a Port and yields Findings. Nothing here executes port code."""
+import difflib
 import hashlib
 import json
 import os
@@ -216,6 +217,9 @@ def required_files(port):
             yield Finding("files.missing", sev, f"Missing {name} ({where}).", fix=fix)
     for c in port.files():
         if c.name.lower() == "cover.png" and c.parent not in port.meta_dirs():
+            twin = port.root / c.name
+            if port.gamedir is not None and c.parent == port.gamedir and twin.is_file() and twin.read_bytes() == c.read_bytes():
+                continue   # structure.duplicate-meta reports the extra copy
             yield Finding("files.cover-location", WARN, f"{port.rel(c)} is in the wrong place; cover.png goes {where}.", file=port.rel(c))
     if port.gamedir is not None:
         lic = [d for d in port.gamedir.iterdir() if d.is_dir() and d.name.lower() in ("licenses", "license", "licences", "licence")]
@@ -332,9 +336,13 @@ def port_json(port):
     # arch is an OR list; device_info.txt adds "armhf" to an aarch64 device's capabilities only when it
     # has a 32-bit userland. There are no armhf-only devices. Prebuilt helpers (gamepad-picker, gptokeyb...) don't count.
     found = sorted({i["arch"] for p, i in elves(port) if not data.PREBUILT_RE.match(p.name)}) or found
+    scripts_all = "\n".join(script_text(port, sc) for sc in port.scripts)
+    armhf_test = re.search(r"DEVICE_HAS_ARMHF|-[edfx]\s+\"?/(usr/)?lib(32\b|/ld-linux-armhf)", scripts_all)
+    armhf_glibc = re.search(r"ld-linux-armhf\.so\.3\"?\s+--version|\bldd\s+--version", scripts_all)
     if "armhf" in found and "aarch64" in found:
-        yield Finding("port.json.arch", INFO, "Ships an armhf build next to the aarch64 one. Every device runs the aarch64 build and some have no 32-bit userland: ask the porter why the armhf version is included.",
-                      file=f)
+        if not armhf_test:   # a script that picks the build by the userland has a reason
+            yield Finding("port.json.arch", INFO, "Ships an armhf build next to the aarch64 one. Every device runs the aarch64 build and some have no 32-bit userland: ask the porter why the armhf version is included.",
+                          file=f)
     elif "armhf" in found and arch and "armhf" not in arch:
         yield Finding("port.json.arch", WARN, "Only armhf binaries, but arch does not list armhf: the port is offered on devices without a 32-bit userland, where it can't start.",
                       file=f, fix='"arch": ["armhf"]')
@@ -347,7 +355,7 @@ def port_json(port):
     allg = [(i["glibc"], p, i["arch"]) for p, i in elves(port) if i["glibc"]]
     need = [(g, p) for g, p, a in allg if not arch or a in arch]
     other = [(g, p) for g, p, a in allg if arch and a not in arch]
-    if other:
+    if other and not armhf_glibc:   # the script reads the 32-bit glibc version before choosing that build
         otop, ofile = max(other, key=lambda x: version_tuple(x[0]))
         if not need or version_tuple(otop) > version_tuple(max(need, key=lambda x: version_tuple(x[0]))[0]):
             yield Finding("port.json.min_glibc", INFO, f"{port.rel(ofile)} needs GLIBC_{otop} from the 32-bit userland; min_glibc only covers the native one, "
@@ -621,7 +629,23 @@ def _in_gl4es(p):
     return any(part.startswith("gl4es") for part in p.parts)
 
 
-SO_TOKEN = re.compile(rb"[\w.+\-]*\.so(?:\.[\w.]*)?(?![\w.\-])")
+SO_TAIL = re.compile(rb"\.so(?:\.[\w.]*)?(?![\w.\-])")
+SO_CHARS = frozenset(b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.+-")
+
+
+def so_tokens(blob):
+    """Every library-name token (libfoo.so, libfoo.so.1.2) in a byte string. Scans from each '.so' instead of
+    running a regex over every byte: about 200x faster on large binaries and APKs."""
+    out, i = set(), blob.find(b".so")
+    while i != -1:
+        m = SO_TAIL.match(blob, i)
+        if m:
+            j = i
+            while j > 0 and blob[j - 1] in SO_CHARS:
+                j -= 1
+            out.add(blob[j:m.end()])
+        i = blob.find(b".so", i + 3)
+    return out
 
 
 def _named_elsewhere(port, p):
@@ -632,7 +656,7 @@ def _named_elsewhere(port, p):
         for q in port.logical_files():
             try:
                 if q.stat().st_size <= 200_000_000:
-                    port._so_names[q] = set(SO_TOKEN.findall(q.read_bytes()))
+                    port._so_names[q] = so_tokens(q.read_bytes())
             except OSError:
                 pass
     want = p.name.encode()
@@ -895,7 +919,10 @@ def licences(port):
         if gl:
             cands.add(gl)
         flat = re.sub(r"[^a-z0-9]", "", stem)
-        if any(flat.startswith(t) or t.startswith(flat) for t in tokens if len(t) >= 3):
+        alias = data.LIB_LICENCE_ALIASES.get(flat)   # libbz2 -> bzip2: the project's name, not the library's
+        if alias:
+            cands.add(alias)
+        if any(f.startswith(t) or t.startswith(f) for f in filter(None, (flat, alias)) for t in tokens if len(t) >= 3):
             continue
         if cands and not any(c in squashed for c in cands):
             name = gl or stem
@@ -929,6 +956,59 @@ def _game_licence(port, lic, attr):
     return False
 
 
+@check
+def duplicate_scripts(port):
+    """Two near-identical helper scripts (a 32-bit and a 64-bit copy of one setup): one script with a switch is half the review."""
+    if port.gamedir is None:
+        return
+    cands = []
+    for p in port.logical_files():
+        if p in port.scripts or re.search(r"(^|/)licen[cs]es?/", port.rel(p), re.I):
+            continue
+        try:
+            size = p.stat().st_size
+        except OSError:
+            continue
+        if not 4096 <= size <= 1_000_000:
+            continue
+        if p.suffix.lower() in (".sh", ".py", ".bash"):
+            cands.append(p)
+        elif not p.suffix:
+            with p.open("rb") as fh:
+                if fh.read(2) == b"#!":
+                    cands.append(p)
+    cands = sorted(cands, key=lambda x: port.rel(x))[:40]
+    texts = {p: [l.strip() for l in port.read_text(p).splitlines() if l.strip() and not l.strip().startswith("#")] for p in cands}   # code lines: comments differ first
+    done = set()
+    for i, a in enumerate(cands):
+        for b in cands[i + 1:]:
+            if a in done or b in done:
+                continue
+            if min(len(texts[a]), len(texts[b])) < 60:
+                continue
+            sm = difflib.SequenceMatcher(None, texts[a], texts[b], autojunk=False)
+            if sm.quick_ratio() >= 0.9 and sm.ratio() >= 0.9:
+                done |= {a, b}
+                yield Finding("files.duplicate-script", INFO, f"{port.rel(a)} and {port.rel(b)} are {sm.ratio():.0%} the same script; every fix has to be made twice.",
+                              file=port.rel(b), fix="Keep one script and pass the difference as an argument or variable.")
+
+
+@check
+def pr_scope(port):
+    """Files the pull request changes outside ports/ (PR mode, --pr-files)."""
+    outside = [x for x in getattr(port, "pr_outside", None) or [] if not x.startswith("ports/")]
+    if not outside:
+        return
+    rt = [x for x in outside if x.startswith("runtimes/")]
+    rest = [x for x in outside if x not in rt]
+    if rt:
+        yield Finding("pr.outside-ports", WARN, f"The pull request also adds {', '.join(rt[:3])}{' and more' if len(rt) > 3 else ''}. A runtime goes in its own pull request, "
+                      "reviewed and merged before the port that needs it.", fix="Remove it from this PR and open a separate one for the runtime.")
+    if rest:
+        yield Finding("pr.outside-ports", WARN, f"The pull request changes files outside ports/: {', '.join(rest[:5])}{' and more' if len(rest) > 5 else ''}.",
+                      fix="A port PR only touches ports/<name>/; move other changes to their own PR.")
+
+
 # ---------------------------------------------------------------- launch script
 BOILER = re.compile(r"^XDG_DATA_HOME=")
 
@@ -937,6 +1017,141 @@ BOILER = re.compile(r"^XDG_DATA_HOME=")
 def launch_script(port):
     for s in port.scripts:
         yield from _script(port, s)
+
+
+def _assigns(code):
+    return dict(re.findall(r"^\s*(?:export\s+|local\s+)?(\w+)=\"?([^\"\s;]+)\"?\s*$", "\n".join(l for _, l in code), re.M))
+
+
+def _port_path(port, arg, assigns):
+    """A script path (quoted, with $VARS from simple assignments) as a file in the package, or None."""
+    arg = arg.strip("\"'")
+    for _ in range(3):
+        arg = re.sub(r"\$\{?(\w+)\}?", lambda v: assigns.get(v.group(1), v.group(0)) if v.group(1) not in ("GAMEDIR", "directory", "HOME") else v.group(0), arg)
+    if port.gamedir is None or "controlfolder" in arg:
+        return None
+    if "$" in arg:
+        t = _resolve(port, arg)
+    elif not arg.startswith(("/", "~")):
+        t = port.gamedir / arg.removeprefix("./")
+    else:
+        t = None
+    return t if t is not None and t.is_file() else None
+
+
+def _functions(code):
+    """name -> (first line, last line) of shell functions defined at the top level."""
+    out, cur = {}, None
+    for n, l in code:
+        m = re.match(r"\s*(?:function\s+)?(\w+)\s*\(\)\s*\{?\s*$", l)
+        if cur is None and m:
+            cur = (m.group(1), n)
+        elif cur is not None and re.match(r"\}\s*$", l):
+            out[cur[0]] = (cur[1], n)
+            cur = None
+    return out
+
+
+@check
+def script_platform(port):
+    """Launch-script lines that redo or undo what control.txt / device_info.txt / funcs.txt / mod_*.txt already do."""
+    armhf_exes = {p.name for p, i in elves(port) if i["arch"] == "armhf" and ".so" not in p.name
+                  and (not data.PREBUILT_RE.match(p.name) or p.name.startswith("box86"))}
+    for s in port.scripts:
+        f = port.rel(s)
+        text = port.read_text(s)
+        lines = text.splitlines()
+        code = [(n, l) for n, l in enumerate(lines, 1) if not l.strip().startswith("#")]
+        body = "\n".join(l for _, l in code)
+        if len([l for _, l in code if l.strip()]) <= 8:
+            continue   # a wrapper that runs another launch script
+        if len(lines) > 1 and lines[1].startswith("# PORTMASTER:"):
+            yield Finding("sh.signature", INFO, "Line 2 is harbourmaster's install signature (# PORTMASTER: <zip>, <script>); the script was copied back from a handheld. "
+                          "PortMaster writes it on the device at install time.", file=f, line=2, fix="Delete the line.")
+        for n, l in code:
+            if re.match(r"\s*cd\s+\"?\$\{?GAMEDIR\}?/?\"?\s*\|\|\s*(exit|return)\b", l):
+                yield Finding("sh.cd-exit", INFO, "cd \"$GAMEDIR\" || exit is not the template (11 of 1536 merged ports); GAMEDIR is the port's own folder and always exists.",
+                              file=f, line=n, fix="cd $GAMEDIR")
+                break
+        # 32-bit programs: mod_<CFW>.txt sets up the 32-bit sound/GL libraries when PORT_32BIT=Y comes before it
+        mod_n = next((n for n, l in code if re.search(r"mod_\$\{?CFW_NAME\}?\.txt", l)), None)
+        # lib32 first on the path is the 32-bit loader's search order; appended at the end it is a habit of 64-bit Mono/FNA ports
+        lib32 = next((n for n, l in code if re.search(r"LD_LIBRARY_PATH=[\"']?(/usr/config/emuelec)?/(usr/)?lib32\b", l)), None)
+        runs32 = next((n for n, l in code for e in armhf_exes if re.search(r"(?<![\w.-])" + re.escape(e) + r"(?![\w.-])", l)), None)
+        set32 = [n for n, l in code if re.search(r"PORT_32BIT=[\"']?Y", l)]
+        if mod_n and (lib32 or runs32) and not any(n < mod_n for n in set32):
+            late = f" It is set on line {set32[0]}, after mod_${{CFW_NAME}}.txt (line {mod_n}), which has already run." if set32 else ""
+            yield Finding("sh.port-32bit", WARN, "The port runs a 32-bit program, but PORT_32BIT=\"Y\" isn't set before mod_${CFW_NAME}.txt is sourced. On ROCKNIX, JELOS, "
+                          "UnofficialOS and Batocera that file then points PipeWire at the 32-bit plugins in /usr/lib32 (213 merged ports set it); without it the game has no sound there." + late,
+                          file=f, line=runs32 or lib32,
+                          fix='export PORT_32BIT="Y" before the mod_ line (only on the 32-bit route when the script picks one); then no SDL_AUDIODRIVER override is needed.')
+        probe = next(((n, l) for n, l in code if re.search(r"-[edfx]\s+\"?/(usr/)?lib(32\b|/ld-linux-armhf\.so\.3)", l)), None)
+        if probe and "DEVICE_HAS_ARMHF" not in body:
+            yield Finding("sh.has-armhf", INFO, "The script looks for a 32-bit userland itself; device_info.txt (sourced by control.txt) already sets $DEVICE_HAS_ARMHF from four paths.",
+                          file=f, line=probe[0], fix='[ "$DEVICE_HAS_ARMHF" = Y ] (keep a glibc version test if the 32-bit build needs a newer one)')
+        # pm_finish mid-script: also restarts oga_events and clears the console; pm_gptokeyb_finish only stops gptokeyb
+        funcs = _functions(code)
+        starts = r"\$\{?GPTOKEYB2?\b|\bpm_platform_helper\b"
+        starters = {name for name, (a, b) in funcs.items() if any(re.search(starts, l) for n, l in code if a < n <= b)}
+        start_rx = re.compile(starts + (r"|^\s*(" + "|".join(map(re.escape, starters)) + r")\b" if starters else ""))
+        for i, (n, l) in enumerate(code):
+            if not re.match(r"\s*pm_finish\b", l) or re.search(r"\bpm_finish\b.*[;&|]\s*(exit|return)\b", l):
+                continue
+            nxt = [x for _, x in code[i + 1:] if x.strip()][:2]
+            if any(re.match(r"\s*(exit|return|exec)\b", x) for x in nxt) or (nxt and re.match(r"\s*(else|elif)\b|\s*;;", nxt[0])):
+                continue   # ends the script, or ends one branch of an if/case (the other branch starts the game)
+            owner = next((name for name, (a, b) in funcs.items() if a < n <= b), None)
+            if owner:
+                calls = [k for k, x in code if re.match(r"\s*" + re.escape(owner) + r"\b", x) and not (funcs[owner][0] <= k <= funcs[owner][1])]
+                later = any(start_rx.search(x) for c in calls for k, x in code if k > c and not any(a <= k <= b for a, b in funcs.values()))
+            else:
+                later = any(start_rx.search(x) for k, x in code if k > n and not any(a <= k <= b for a, b in funcs.values()))
+            if later:
+                yield Finding("sh.pm-finish-mid", WARN, "pm_finish runs before the game (or another tool) starts; besides stopping gptokeyb it restarts oga_events and clears the console.",
+                              file=f, line=n, fix="pm_gptokeyb_finish (funcs.txt) stops gptokeyb only; keep pm_finish for the end of the script.")
+                break
+        # files the script sources from the port folder are part of it
+        assigns = _assigns(code)
+        helpers = []
+        for n, l in code:
+            m = re.match(r"\s*(?:source|\.)\s+(\"[^\"]+\"|'[^']+'|\S+)", l)
+            t = _port_path(port, m.group(1), assigns) if m else None
+            if t is not None and t not in helpers and t not in port.scripts:
+                helpers.append(t)
+        parts = [(f, code)] + [(port.rel(h), [(n, l) for n, l in enumerate(port.read_text(h).splitlines(), 1) if not l.strip().startswith("#")]) for h in helpers]
+        all_code = "\n".join(l for _, c in parts for _, l in c)
+        uses_msg = re.search(r"\bpm_message\b", all_code)   # pm_message_end gives the last card its time; pm_show_error blocks by itself
+        for where, c in parts if uses_msg else []:
+            for n, l in c:
+                if re.match(r"\s*trap\s+.*\bEXIT\b", l) and "pm_message_end" not in l and "pm_finish" not in l:
+                    handler = re.match(r"\s*trap\s+[\"']?(\w+)", l)
+                    hb = funcs.get(handler.group(1)) if handler else None
+                    if hb and any(re.search(r"\bpm_(message_end|finish)\b", x) for k, x in code if hb[0] < k <= hb[1]):
+                        continue
+                    yield Finding("sh.trap-exit", INFO, "trap ... EXIT replaces funcs.txt's own trap pm_message_end EXIT, so a pm_message card no longer gets its time on screen when the script ends.",
+                                  file=where, line=n, fix="Add it to the trap: trap '<your cleanup>; pm_message_end' EXIT")
+        for where, c in parts:
+            hit = next(((n, l) for n, l in c if re.search(r"\b(swapon|mkswap|zramctl)\b|/sys/block/zram|modprobe\s+zram", l)), None)
+            if hit:
+                dd = " It also writes a swapfile with dd/fallocate: check where it lands (never outside the port folder) and that it is removed." if re.search(r"\b(dd\s+if=/dev/zero|fallocate)\b", all_code) else ""
+                yield Finding("sh.swap", INFO, "The port sets up swap or zram on the device." + dd + " Reviewers ask whether it's needed, and whether every exit path turns it off again.",
+                              file=where, line=hit[0], fix="Keep it only for a measured out-of-memory problem; prefer zram, and switch it off on exit.")
+                break
+        # a long helper run before the game: setup logic reviewers have to maintain
+        ph = next((n for n, l in code if re.search(r"\bpm_platform_helper\b", l)), None)
+        for n, l in code:
+            if ph and n > ph:
+                break
+            m = re.match(r"\s*(?:\$ESUDO\s+)?(?:python3?|bash|sh)\s+(\"[^\"]+\"|'[^']+'|\S+\.(?:py|sh))(?=\s|;|$)", l)
+            t = _port_path(port, m.group(1), assigns) if m else None
+            if t is None or re.search(r"PATCHER_FILE", body) and t.name in body.split("PATCHER_FILE", 1)[1][:200]:
+                continue
+            count = len(port.read_text(t).splitlines())
+            if count > 300:
+                yield Finding("sh.setup-helper", INFO, f"{port.rel(t)} ({count} lines) runs before the game: first-launch logic reviewers have to read and maintain. "
+                              "PortMaster already has the pieces: utils/patcher.txt (progress screen, PATCH_FAIL_MSG), $controlfolder/xdelta3 for binary patches, "
+                              "$controlfolder/7zzs.$DEVICE_ARCH for archives.", file=f, line=n, fix="Shrink it to what this port needs, built on those.")
+                break
 
 
 def _script(port, s):
@@ -993,7 +1208,7 @@ def _script(port, s):
         yield Finding("sh.uinput", WARN, "control.txt already makes /dev/uinput writable.", file=f, line=n, fix="Delete the line.")
     # Classic vs gptokeyb2 is the porter's choice; only blank .gptk bindings are a reason to switch
     # (blank values don't unbind in classic gptokeyb, its compiled-in default keys stay live).
-    cd_gd = re.search(r"^\s*cd\s+\"?\$\{?GAMEDIR\}?/?\"?\s*(;|&&|$)", body, re.M) or (port.gamedir is not None and port.gamedir.name in body)
+    cd_gd = re.search(r"^\s*cd\s+\"?\$\{?GAMEDIR\}?/?\"?\s*(;|&&|\|\||$)", body, re.M) or (port.gamedir is not None and port.gamedir.name in body)
     for n, l in grep(r"^\s*\$\{?GPTOKEYB\}?\"?\s.*\s-c\s"):
         m = re.search(r"\s-c\s+(\"[^\"]+\"|'[^']+'|\S+)", l)
         arg = m.group(1).strip("\"'")
@@ -1027,6 +1242,11 @@ def _script(port, s):
             continue   # sdl3-sdl2-backend pattern: the CFW's driver goes to SDL3SHIM_SDL2_*, the game gets sdl2
         sev = WARN if "sdl2" in l.lower() and "SDL3SHIM" in body else ERROR
         if sev == ERROR and re.search(r"DRIVER=\"?\$\{SDL_(VIDEO|AUDIO)DRIVER:-", l):
+            if "AUDIODRIVER" in l and re.search(r"/lib32\b|ld-linux-armhf|PORT_32BIT", body):
+                yield Finding("sh.sdl-driver", WARN, "Sets an SDL audio driver default for a 32-bit program. When the CFW sets a driver it is kept anyway, and when it doesn't, SDL falls back to ALSA "
+                              "by itself if the 32-bit PulseAudio/PipeWire client is missing; on ROCKNIX/JELOS/Batocera, PORT_32BIT=Y before mod_${CFW_NAME}.txt makes the 32-bit PipeWire work.",
+                              file=f, line=n, fix='Drop it and export PORT_32BIT="Y" before sourcing mod_${CFW_NAME}.txt.')
+                continue
             yield Finding("sh.sdl-driver", WARN, "Sets an SDL driver default; when the CFW leaves it unset SDL would pick the backend itself.", file=f, line=n,
                           fix="Drop it unless a device needs it, and say which in a short comment.")
             continue
@@ -1090,7 +1310,7 @@ def _script(port, s):
         cds = [(n, l) for n, l in code if n < first and re.match(r"\s*cd\s", l)]
         if cds:
             n_cd, l_cd = cds[-1]
-            arg = l_cd.split(None, 1)[1].split(";")[0].split("&&")[0].strip().strip("\"'").rstrip("/")
+            arg = re.split(r";|&&|\|\|", l_cd.split(None, 1)[1])[0].strip().strip("\"'").rstrip("/")
             assigns = dict(re.findall(r"^\s*(?:export\s+)?(\w+)=\"?([^\"\s]+)\"?\s*$", "\n".join(x for k, x in code if k < n_cd), re.M))
             m = re.fullmatch(r"\$\{?(\w+)\}?", arg)
             val = assigns.get(m.group(1), arg) if m and m.group(1) != "GAMEDIR" else arg
@@ -1292,7 +1512,7 @@ def _script(port, s):
             yield Finding("sh.log-old", WARN, "Old logging line (log path not $GAMEDIR/log.txt).", file=f, line=n,
                           fix='> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1')
     # -c pointing at a control file the package doesn't have: gptokeyb then maps nothing
-    cd_gamedir = re.search(r"^\s*cd\s+\"?\$\{?GAMEDIR\}?/?\"?\s*(;|&&|$)", body, re.M)
+    cd_gamedir = re.search(r"^\s*cd\s+\"?\$\{?GAMEDIR\}?/?\"?\s*(;|&&|\|\||$)", body, re.M)
     for n, l in code:
         m = re.search(r"GPTOKEYB2?\}?\"?\s.*?\s-c\s+(\"[^\"]+\"|'[^']+'|\S+)", l)
         if not m:
@@ -1346,9 +1566,19 @@ def ini_files(port):
         text = port.read_text(p)
         if "[controls" not in text or not _gptk_config(p.name, scripts):
             continue
-        entries = [l for l in text.splitlines() if l.strip() and not l.strip().startswith(("#", ";", "["))]
+        section, entries, settings = "", [], []
+        for l in text.splitlines():
+            st = l.strip()
+            if not st or st.startswith(("#", ";")):
+                continue
+            if st.startswith("["):
+                section = st.strip("[]").strip().lower()
+                continue
+            (entries if section.startswith("controls") else settings).append(st)
         if not entries:
-            yield Finding("ini.empty", INFO, f"{port.rel(p)} has no settings or mappings; gptokeyb2 only needs the binary name for the kill switch.",
+            what = "no settings or mappings" if not settings else "only [config] settings and no button mapped (deadzones only act on a mapped stick)"
+            yield Finding("ini.empty", INFO, f"{port.rel(p)} has {what}; gptokeyb2 only needs the binary name for the kill switch. "
+                          "Without -c it maps nothing (its Start + D-pad text entry only comes with TEXTINPUTINTERACTIVE).",
                           file=port.rel(p), fix='Delete the file and drop -c: $GPTOKEYB2 "$BINARY" &')
             continue
         yield from check_ini(text, port.rel(p), scripts)

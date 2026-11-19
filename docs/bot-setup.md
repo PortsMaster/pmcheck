@@ -75,7 +75,7 @@ ADMIN_ROLE_IDS=1122861574328172635,1298913839919665284,1123158742175846432,12855
 GEMINI_API_KEY=<key from step 4>
 PMCHECK_GEMINI_MODEL=gemini-flash-latest
 MAX_DOWNLOAD_MB=1024
-CHECK_TIMEOUT=900
+CHECK_DEADLINE=780
 GITHUB_TOKEN=<token from "GitHub token" below>
 ```
 - `gemini-flash-latest` follows Google's current Flash model, so retirements don't break it. To pin a model, list the ones your key can use:
@@ -164,7 +164,7 @@ systemctl --user restart pmcheck-bot
 | `KeyError: 'DISCORD_TOKEN'` | The env file wasn't passed; check the path in the service file. |
 | `Improper token has been passed` | The token was reset or mistyped; reset it again in step 2. |
 | `download failed: HTTP 404/403` | The Discord attachment link expired (they're signed for about 24 h); copy a fresh link. |
-| `check timed out` | The port is very large or the server is busy; raise `CHECK_TIMEOUT`. |
+| `check timed out` / "AI review skipped (time limit)" | Download plus checks have to finish inside Discord's 15 minutes (`CHECK_DEADLINE`, max 840 s). The journal shows "downloaded in Ns" and "done in Ns" per port. |
 | `AI review skipped: no GEMINI_API_KEY` | The key is missing from the env file. |
 | `AI review unavailable (HTTP 503 ...)` | Google's free Flash model is overloaded. The bot retries twice (5 s, 20 s), then falls back to `gemini-flash-lite-latest` (`PMCHECK_GEMINI_FALLBACK`, empty disables it). If all fail, run the check again later; the rules report is complete either way. |
 | A PR link answers `input is not a zip file or folder` | The bot is older than 0.1.4. Pull, rebuild and restart (step 12), then check `journalctl`: a PR check logs `/checkport PR #<n>`. |
