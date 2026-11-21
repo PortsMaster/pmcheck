@@ -23,7 +23,7 @@ def check_one(path, ai=False, pr=False, pr_files=None):
         if ai:
             from .llm import review
             ai_result = review(port, findings)
-        name = port.gamedir.name if port.gamedir else Path(path).name
+        name = port.gamedir.name if port.gamedir else (getattr(port, "expected_gamedir", None) or Path(path).name)
         return name, findings, ai_result
     finally:
         port.cleanup()

@@ -768,6 +768,34 @@ class Templates(unittest.TestCase):
                 self.assertEqual(bad, [], key)
 
 
+class RagingThunderLike(unittest.TestCase):
+    def test_no_game_folder_named_by_the_script(self):
+        """ragingthunder2: the binary and .gptk next to the script, only src/ as a folder; src/ is not the game folder"""
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            for p in list(gd(t).iterdir()):
+                if p.is_file() and p.suffix != ".json":
+                    p.rename(Path(t) / p.name)
+            shutil.rmtree(gd(t))
+            (Path(t) / "src").mkdir()
+            (Path(t) / "src" / "main.c").write_text("int main(){}")
+            got = findings(t)
+            f = next(f for f in got if f.rule == "structure.no-gamedir")
+        self.assertIn("ports/testgame/", f.message)
+        self.assertNotIn("src", {x.file.split("/")[0] for x in got if x.file})
+
+    def test_optional_portmaster_and_folder_search(self):
+        text = ('[ -f "$controlfolder/control.txt" ] && source "$controlfolder/control.txt"\n'
+                'if command -v pm_platform_helper >/dev/null; then pm_platform_helper x; fi\n'
+                'SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"\n'
+                'if [ -d a ]; then GAMEDIR=a\nelif [ -d b ]; then GAMEDIR=b\nelse GAMEDIR=c\nfi\n'
+                'export LD_LIBRARY_PATH="$GAMEDIR/libs:/usr/lib/arm-linux-gnueabihf:/usr/lib32:/lib32:/usr/lib:$LD_LIBRARY_PATH"\n')
+        import re
+        from pmcheck import data
+        hits = {k for k, rx, need, _, _ in data.REINVENT_SIGNALS if len(re.findall(rx, text, re.M)) >= need}
+        self.assertTrue({"pm-guards", "gamedir-search", "system-libpath", "script-dir"} <= hits, hits)
+
+
 class SoTokens(unittest.TestCase):
     def test_same_names_as_the_regex(self):
         import re

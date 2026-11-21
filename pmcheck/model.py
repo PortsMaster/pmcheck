@@ -210,8 +210,9 @@ def load(path, pr=False):
     for d in port.top_dirs:
         if gd_name and d.name == gd_name:
             port.gamedir = d
-    if port.gamedir is None and len(port.top_dirs) == 1:
-        port.gamedir = port.top_dirs[0]
+    port.expected_gamedir = gd_name if gd_name and port.gamedir is None else None
+    if port.gamedir is None and len(port.top_dirs) == 1 and not port.expected_gamedir:
+        port.gamedir = port.top_dirs[0]   # the script names no folder: the only one is the game folder
     if port.gamedir is None and port.layout == "pr":
         for d in port.top_dirs:
             if d.name == root.name:

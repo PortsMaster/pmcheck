@@ -108,7 +108,12 @@ def rules_of(path, sev=None, pr=False):
 class Report(unittest.TestCase):
     def test_markdown_escapes_finding_text(self):
         from pmcheck.report import md
-        self.assertEqual(md("libgl_*.txt / LIX_CURSOR_MIN_SCALE"), "libgl\\_\\*.txt / LIX\\_CURSOR\\_MIN\\_SCALE")
+        # code-looking words become code spans (no markdown inside them, and viewers can't mangle $VARS)
+        self.assertEqual(md("libgl_*.txt / LIX_CURSOR_MIN_SCALE"), "`libgl_*.txt` / `LIX_CURSOR_MIN_SCALE`")
+        self.assertEqual(md("log path not $GAMEDIR/log.txt"), "log path not `$GAMEDIR/log.txt`")
+        # ordinary prose is still escaped, links are kept whole and wrapped (no Discord embed)
+        self.assertEqual(md("5 * 3 and/or 1/3"), "5 \\* 3 and/or 1/3")
+        self.assertEqual(md("see https://x.y/the_game/a.sh."), "see <https://x.y/the_game/a.sh>.")
         self.assertEqual(md("use `libgl_${CFW_NAME}.txt`"), "use `libgl_${CFW_NAME}.txt`")
 
 

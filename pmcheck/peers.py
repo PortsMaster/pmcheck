@@ -104,7 +104,8 @@ def kind_median(k):
 
 
 def url(peer):
-    return f"{REPO}/{peer['name']}/{peer['script'].replace(' ', '%20')}"
+    from urllib.parse import quote
+    return f"{REPO}/{quote(peer['name'])}/{quote(peer['script'])}"
 
 
 def raw_url(peer):

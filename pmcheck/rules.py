@@ -126,7 +126,16 @@ def structure(port):
     if not port.scripts:
         yield Finding("structure.no-script", ERROR, "No launch script (.sh) at the top level.")
     if port.gamedir is None:
-        yield Finding("structure.no-gamedir", ERROR, "Game folder not found (no single top-level folder and no GAMEDIR match).")
+        exp = getattr(port, "expected_gamedir", None)
+        if exp:
+            loose = [p.name for p in port.top_files if p.name.lower() not in data.META_FILES]
+            others = [d.name + "/" for d in port.top_dirs]
+            yield Finding("structure.no-gamedir", ERROR, f"The script runs the game from ports/{exp}/, but the zip has no {exp}/ folder"
+                          + (f": {', '.join(loose[:6])} sit next to the script" if loose else "")
+                          + (f" (other folders: {', '.join(others[:4])})" if others else "") + ". PortMaster installs the zip as it is, so the game files "
+                          "would land in ports/ instead of the game folder.", fix=f"Put everything except the .sh into a folder named {exp}/ and zip the .sh and that folder.")
+        else:
+            yield Finding("structure.no-gamedir", ERROR, "Game folder not found (no single top-level folder and no GAMEDIR match).")
         return
     gd = port.gamedir.name
     if gd != name_cleaner(gd):
@@ -523,7 +532,7 @@ def readme(port):
     dl = re.search(r"^#{1,3}\s*(downloads?|releases?|get it|installing the zip)\b.*$", text, re.M | re.I) or \
         re.search(r"harbourmaster\s+install|autoinstall\b|/-/releases|/releases/(latest|permalink)", text, re.I)
     if dl:
-        yield Finding("readme.download", INFO, f"The README tells players where else to download or how to install the port ('{dl.group(0).strip()[:60]}'). "
+        yield Finding("readme.download", INFO, f"The README tells players where else to download or how to install the port (`{dl.group(0).strip()[:60]}`). "
                       "On PortMaster the port is installed by PortMaster itself, so this part only fits your own repository's README.",
                       file=port.rel(p), fix="Keep Notes, Controls and Compile here; move download and install instructions to your repository.")
     for h in need:
@@ -1180,16 +1189,16 @@ def script_lean(port):
                      and not re.match(r"\s*(\$\{?ESUDO\}?\s+)?cp\b[^#]*\s/usr/lib", l)
                      and not re.search(r"/libs?(\.[\w]+)?(/|$)", _dest(l))]   # within the port's own library folder
         if lib_moves:
-            how = ("box64 loads them where they are: BOX64_LD_LIBRARY_PATH=\"$GAMEDIR/libs.x86_64\" for libraries and BOX64_LD_PRELOAD=\"$GAMEDIR/<stub>.so\" "
-                   "for a stub that has to win (as in the Papers, Please port)") if box64 else \
-                  "LD_LIBRARY_PATH (or LD_PRELOAD on the game's command) loads them from the port folder"
+            how = ("box64 loads them where they are: `BOX64_LD_LIBRARY_PATH=\"$GAMEDIR/libs.x86_64\"` for libraries and `BOX64_LD_PRELOAD=\"$GAMEDIR/<stub>.so\"` "
+                   "for a stub that has to win, as the Papers, Please port does") if box64 else \
+                  "`LD_LIBRARY_PATH`, or `LD_PRELOAD` on the game's command, loads them from the port folder"
             more = f" (also lines {', '.join(str(n) for n, _ in lib_moves[1:4])})" if len(lib_moves) > 1 else ""
             yield Finding("sh.player-files", INFO, f"The script copies or renames libraries inside the game files on every launch{more}. "
-                          f"That changes the player's own copy of the game, and the step isn't needed: {how}.",
+                          f"That changes the player's own copy of the game, and it isn't needed: {how}.",
                           file=f, line=lib_moves[0][0], fix="Load the libraries from the port folder and leave the game files as the player copied them.")
         appid = next(((n, l) for n, l in code if re.search(r"(>|tee\s)\s*\"?[^\s\"]*steam_appid\.txt", l)), None)
         if appid and stub:
-            yield Finding("sh.steam-appid", INFO, "The script writes steam_appid.txt, but the port ships its own libsteam_api stub; only Steam's real library reads that file.",
+            yield Finding("sh.steam-appid", INFO, "The script writes `steam_appid.txt`, but the port ships its own `libsteam_api` stub, and only Steam's real library reads that file.",
                           file=f, line=appid[0], fix="Drop the line.")
         # saves copied out of a folder inside the port and back in: that folder already lives on the SD card
         conf_rx = r"\$\{?CONFDIR\}?|\$\{?GAMEDIR\}?/conf\b"
@@ -1198,21 +1207,21 @@ def script_lean(port):
         from_conf = [n for n, c in cps if re.search(r"\s\"?(" + conf_rx + r")", c) and not re.search(r"(" + conf_rx + r")[^\s\"]*/?\"?\s*$", c)]
         loops = [n for n, l in code if re.match(r"\s*for\s+\w+\s+in\s[^#]*(" + conf_rx + r")", l)]
         if (to_conf and from_conf) or (to_conf and loops):
-            yield Finding("sh.save-mirror", INFO, "The script copies save files into conf/ and back. The folder the game writes to is already inside the port folder, "
+            yield Finding("sh.save-mirror", INFO, "The script copies save files into `conf/` and back. The folder the game writes to is already inside the port folder, "
                           "so the saves are kept without the copies.", file=f, line=min(to_conf + from_conf + loops),
-                          fix="Let the game keep its saves where it writes them; use bind_directories only when the game writes outside the port folder.")
+                          fix="Let the game keep its saves where it writes them; use `bind_directories` only when the game writes outside the port folder.")
         for name, (a, b) in _functions(code).items():
             body = [l for n, l in code if a < n < b and l.strip()]
             if len(body) > 20:
-                yield Finding("sh.long-function", INFO, f"{name}() is {len(body)} lines: a feature of its own inside the launch script. Reviewers will ask whether players need it; "
+                yield Finding("sh.long-function", INFO, f"`{name}()` is {len(body)} lines, a feature of its own inside the launch script. Reviewers will ask whether players need it; "
                               "most merged scripts have no functions at all.", file=f, line=a,
                               fix="Keep it only if the port needs it, and say in the PR what it does.")
         # $HOTKEY is set per device by control.txt; gptokeyb2's default otherwise is Select (state.c)
         hk = next(((n, l) for n, l in code if re.match(r"\s*(export\s+)?HOTKEY=", l)), None)
         if hk:
-            yield Finding("sh.hotkey-override", WARN, "The script sets HOTKEY itself. control.txt sets it on the devices that need another button (L3 on the OGA 1.0 "
+            yield Finding("sh.hotkey-override", WARN, "The script sets `HOTKEY` itself. `control.txt` sets it on the devices that need another button (L3 on the OGA 1.0 "
                           "and Gameforce Chi, Guide on the RGB10 Max with ArkOS); elsewhere gptokeyb2 uses Select. A fixed value moves the exit combo on every "
-                          "other device, e.g. Guide + Start on handhelds without a Guide button.", file=f, line=hk[0], fix="Drop the line; control.txt picks the hotkey per device.")
+                          "other device, e.g. Guide + Start on handhelds without a Guide button.", file=f, line=hk[0], fix="Drop the line; `control.txt` picks the hotkey per device.")
         # the port downloading its own updates: PortMaster installs and updates ports
         upd = next(((n, l) for n, l in code if re.search(r"autoinstall|\b(curl|wget)\b[^#]*https?://|update\.py", l)
                     and not re.search(r"harbourmaster|runtime_check", l)), None)
@@ -1228,7 +1237,7 @@ def script_lean(port):
         peer, _ = peers.closest(text, exclude=port.gamedir.name if port.gamedir is not None else None)
         keys = templates.pick(text, [x.name for x in port.files()])
         extra = templates.extra_lines(text, keys, peer["keys"] if peer else (), frozenset(data.SCRIPT_LINES["lines"]))
-        ref = f"the closest merged port, {peer['name']} ({peers.url(peer)})" if peer else "merged ports"
+        ref = f"the closest merged port, {peer['name']}: {peers.url(peer)}" if peer else "merged ports of the same kind"
         length = (f"{n_code} lines of code, where merged {k.replace('+', ' + ')} ports have a median of {med or data.SCRIPT_MEDIAN}. ") if n_code > limit else ""
         if len(extra) >= data.TEMPLATE_DIFF_MIN:
             blocks = []
@@ -1237,14 +1246,13 @@ def script_lean(port):
                     blocks[-1][1] = n
                 else:
                     blocks.append([n, n, raw])
-            shown = "; ".join((f"{a}-{b}" if a != b else f"{a}") + f" ({t[:45]}{'...' if len(t) > 45 else ''})" for a, b, t in blocks[:10])
-            more = f" and {len(blocks) - 10} more" if len(blocks) > 10 else ""
-            yield Finding("sh.template-diff", INFO, f"{length}{len(extra)} lines are in neither {templates.describe(keys)} nor {ref}: "
-                          f"lines {shown}{more}. Each can be right for this game; reviewers will ask what each one is for, and the ones PortMaster or the "
-                          "runtime already handle can go.", file=f, line=extra[0][0],
-                          fix="Put the script next to the example and the merged port; keep a block when a real device needs it, with a one-line comment saying which.")
+            compare = f"Compare it with {templates.describe(keys)}" + (f" and with {peer['name']}, the closest merged port: {peers.url(peer)}" if peer else "")
+            yield Finding("sh.template-diff", INFO, f"{length}{len(extra)} lines are in neither the template nor the closest merged port; they are listed below. "
+                          "Each can be right for this game, but reviewers will ask what each one is for, and the ones PortMaster or the runtime already handle can go.",
+                          file=f, line=extra[0][0], snippet=_listing(blocks),
+                          fix=f"{compare}. Keep a block when a real device needs it, with a one-line comment saying which.")
         elif length:
-            yield Finding("sh.length", INFO, f"{length}It follows its examples otherwise; compare it with {ref} to see what can be shorter.", file=f)
+            yield Finding("sh.length", INFO, f"{length}It follows its template otherwise.", file=f, fix=f"Compare it with {ref} to see what can be shorter.")
 
 
 @check
@@ -1261,12 +1269,12 @@ def script_platform(port):
         if len([l for _, l in code if l.strip()]) <= 8:
             continue   # a wrapper that runs another launch script
         if len(lines) > 1 and lines[1].startswith("# PORTMASTER:"):
-            yield Finding("sh.signature", INFO, "Line 2 is harbourmaster's install signature (# PORTMASTER: <zip>, <script>); the script was copied back from a handheld. "
+            yield Finding("sh.signature", INFO, "Line 2 is harbourmaster's install signature (`# PORTMASTER: <zip>, <script>`); the script was copied back from a handheld. "
                           "PortMaster writes it on the device at install time.", file=f, line=2, fix="Delete the line.")
         for n, l in code:
             if re.match(r"\s*cd\s+\"?\$\{?GAMEDIR\}?/?\"?\s*\|\|\s*(exit|return)\b", l):
-                yield Finding("sh.cd-exit", INFO, "cd \"$GAMEDIR\" || exit is not the template (11 of 1536 merged ports); GAMEDIR is the port's own folder and always exists.",
-                              file=f, line=n, fix="cd $GAMEDIR")
+                yield Finding("sh.cd-exit", INFO, "`cd \"$GAMEDIR\" || exit` is not the template (11 of 1536 merged ports); `$GAMEDIR` is the port's own folder and always exists.",
+                              file=f, line=n, fix="`cd $GAMEDIR`")
                 break
         # 32-bit programs: mod_<CFW>.txt sets up the 32-bit sound/GL libraries when PORT_32BIT=Y comes before it
         mod_n = next((n for n, l in code if re.search(r"mod_\$\{?CFW_NAME\}?\.txt", l)), None)
@@ -1343,6 +1351,17 @@ def script_platform(port):
                 break
 
 
+def _listing(blocks, limit=12, width=70):
+    """Line blocks [(first, last, first line's text)] as a code listing: '79-100  apply_button_swaps() {'."""
+    rows = []
+    for a, b, t in blocks[:limit]:
+        nums = f"{a}-{b}" if a != b else f"{a}"
+        rows.append(f"{nums:<8}{t[:width]}{'...' if len(t) > width else ''}")
+    if len(blocks) > limit:
+        rows.append(f"... and {len(blocks) - limit} more")
+    return "\n".join(rows)
+
+
 def _script(port, s):
     f = port.rel(s)
     raw = Path(s).read_bytes()
@@ -1391,7 +1410,7 @@ def _script(port, s):
     if not re.search(r"\bpm_platform_helper\b", body):
         yield Finding("sh.platform-helper", WARN, "pm_platform_helper is not called before the game starts.", file=f,
                       fix='pm_platform_helper "$GAMEDIR/$BINARY"')
-    for n, l in grep(r"^\s*(source|\.)\s+\"?\$\{?controlfolder\}?/device_info\.txt"):
+    for n, l in grep(r"^\s*(\[[^]]*\]\s*&&\s*)?(source|\.)\s+\"?\$\{?controlfolder\}?/device_info\.txt"):
         yield Finding("sh.device-info", WARN, "control.txt already sources device_info.txt.", file=f, line=n, fix="Delete the line.")
     for n, l in grep(r"chmod\s+\S+\s+/dev/uinput"):
         yield Finding("sh.uinput", WARN, "control.txt already makes /dev/uinput writable.", file=f, line=n, fix="Delete the line.")
@@ -1453,15 +1472,13 @@ def _script(port, s):
                 blocks[-1][1] = n
             else:
                 blocks.append([n, n, raw.strip()])
-        shown = "; ".join((f"{a}-{b}" if a != b else f"{a}") + f" ({t[:50]}{'...' if len(t) > 50 else ''})" for a, b, t in blocks[:8])
-        more = f" and {len(blocks) - 8} more" if len(blocks) > 8 else ""
         sev = WARN if len(rare) > pc["99"] else INFO
         yield Finding("sh.nonstandard", sev,
-                      f"{len(rare)} lines reach into the system (system paths, driver/audio variables, system tools, CFW checks) in ways no template and fewer than "
-                      f"{data.SCRIPT_LINES['min_scripts']} of {data.SCRIPT_LINES['scripts']} merged ports use (merged ports: {pc['50']} at the median, {pc['95']} at the 95th percentile, "
-                      f"{pc['99']} at the 99th). Lines {shown}{more}.",
-                      file=f, line=rare[0][0],
-                      fix="For each block, note which device problem it fixes. If control.txt, funcs.txt, libgl_*.txt or mod_*.txt already handle it, the block can go.")
+                      f"{len(rare)} lines reach into the system (system paths, driver or audio variables, system tools, CFW checks) in a way no template "
+                      f"and fewer than {data.SCRIPT_LINES['min_scripts']} of {data.SCRIPT_LINES['scripts']} merged ports do. Merged ports have "
+                      f"{pc['50']} such lines at the median and {pc['99']} at most (99th percentile). The blocks are listed below.",
+                      file=f, line=rare[0][0], snippet=_listing(blocks, 8),
+                      fix="For each block, note which device problem it fixes. If `control.txt`, `funcs.txt`, `libgl_*.txt` or `mod_*.txt` already handle it, the block can go.")
     # Reinventing what PortMaster's own files already do (the CFW's libgl_*.txt / mod_*.txt decide GPU and gl4es)
     libgl_set = [(n, l) for n, l in grep(r"^\s*(export\s+|unset\s+)?[^#]*\bLIBGL_(ES|GL|FB|EGL|GLES)\b\s*=?")
                  if re.search(r"\bLIBGL_(ES|GL|FB|EGL|GLES)=|\bunset\b.*\bLIBGL_(ES|GL|FB|EGL|GLES)\b|export\s+LIBGL_(ES|GL|FB|EGL|GLES)\b", l)
@@ -1624,7 +1641,7 @@ def _script(port, s):
                       "is switched off, the port's copy stays and breaks sound in every other port." + card,
                       file=f, line=n, fix="Ask which device and symptom it fixes; a CFW audio problem belongs in the CFW or mod_<CFW>.txt. "
                       "Merged ports only restore the CFW's own file: [ ! -f ~/.asoundrc ] && [ -f ~/.asoundrcbak ] && cp ~/.asoundrcbak ~/.asoundrc")
-    for n, l in grep(r"^\s*(echo|printf)\b.*>\s*\"?(\$\{?CUR_TTY\}?|/dev/tty\d*)\"?"):
+    for n, l in grep(r"^\s*((echo|printf)\b.*|\})\s*>\s*\"?(\$\{?CUR_TTY\}?|/dev/tty\d*)\"?"):
         if re.search(r"\\033c|\\e\[|\\033\[", l):
             continue   # clearing the console
         yield Finding("sh.tty-message", WARN, "Message written to the console TTY (old style); many CFWs show EmulationStation or nothing there.", file=f, line=n,
@@ -1693,7 +1710,7 @@ def _script(port, s):
             continue   # stops one gptokeyb (e.g. a launcher's) before the game starts its own
         yield Finding("sh.kill-gptokeyb", WARN, "Obsolete: pm_finish and patcher.txt stop gptokeyb themselves (pm_gptokeyb_finish).", file=f, line=n,
                       fix="Delete the line; end the script with pm_finish (it replaces the old kill / oga_events / printf cleanup).")
-    for n, l in grep(r"^\s*exec\s*>\s*\"?\$\{?GAMEDIR\}?/log\.txt\"?\s*2>&1\s*$"):
+    for n, l in grep(r"^\s*exec\s*>\s*\"?\$\{?(GAMEDIR\}?/log\.txt|\w*LOG\w*\}?)\"?\s*2>&1\s*$"):
         yield Finding("sh.log-old", WARN, "Old logging line.", file=f, line=n,
                       fix='> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1')
     for n, l in grep(r"^\s*exec\s*>\s*>\(\s*tee\b"):

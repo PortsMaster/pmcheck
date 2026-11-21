@@ -159,10 +159,19 @@ REINVENT_SIGNALS = [
      "changes kernel settings", "ports leave kernel settings to the CFW"),
     ("esudo-env", r"\$\{?ESUDO\}?\s+env\s", 1,
      "runs the game as root through $ESUDO env", "the game runs as the normal user; $ESUDO is only for mount and chmod"),
+    ("pm-guards", r'\[\s*-f\s+"?\$\{?controlfolder\}?/control\.txt"?\s*\]|command\s+-v\s+pm_\w+|\[\s*-n\s+"?\$\{?GPTOKEYB2?\}?"?\s*\]', 1,
+     "treats PortMaster as optional (checks for control.txt, $GPTOKEYB or the pm_* helpers)",
+     "launch scripts only run under PortMaster, which always provides control.txt, $GPTOKEYB2 and the pm_* helpers"),
+    ("gamedir-search", r"(?:^|\bthen\b|\belse\b|;)\s*(export\s+)?GAMEDIR=", 3,
+     "searches several places for its own game folder", "GAMEDIR=/$directory/ports/<folder>: control.txt sets $directory on every CFW"),
+    ("system-libpath", r'LD_LIBRARY_PATH=(?:[^\n]*?/(?:usr/|opt/[\w-]+/(?:extra/)?)?lib(?:32|64)?(?:/[\w-]+)?(?=[:"\s]|$)){4}', 1,
+     "puts the system's library folders on LD_LIBRARY_PATH", "the system folders are searched anyway; list only the port's own libs folder"),
+    ("script-dir", r'readlink\s+-f\s+"?\$0|dirname\s+"?\$0|BASH_SOURCE', 1,
+     "works out where the script itself lives", "$GAMEDIR (from $directory) already points at the port folder"),
 ]
 # existing findings that are themselves PortMaster work done again
 REINVENT_RULES = {
     "sh.boilerplate", "sh.env-knobs", "sh.libgl-manual", "sh.gpu-probe", "sh.has-armhf", "sh.device-info", "sh.uinput",
     "sh.controlfolder", "sh.mod", "sh.get_controls", "sh.pm_finish", "sh.swap", "sh.home", "sh.sdl-driver", "sh.trap-exit",
-    "sh.setup-helper", "files.duplicate-script", "sh.no-gptokeyb",
+    "sh.setup-helper", "files.duplicate-script", "sh.no-gptokeyb", "sh.kill-gptokeyb", "sh.tty-message",
 }
