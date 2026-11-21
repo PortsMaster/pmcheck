@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from functools import lru_cache
 from pathlib import Path
 
-from . import data
+from . import data, peers, templates
 from .findings import Finding, ERROR, WARN, INFO
 from .ini import check_ini
 from .gptk import check_gptk
@@ -520,6 +520,12 @@ def readme(port):
     if issues:
         yield Finding("readme.layout", INFO, f"README doesn't follow the template: {'; '.join(issues)}.", file=port.rel(p),
                       fix=f"## Notes / ## Controls / ## Compile in plain markdown; {data.MARKDOWN_GENERATOR} builds one.")
+    dl = re.search(r"^#{1,3}\s*(downloads?|releases?|get it|installing the zip)\b.*$", text, re.M | re.I) or \
+        re.search(r"harbourmaster\s+install|autoinstall\b|/-/releases|/releases/(latest|permalink)", text, re.I)
+    if dl:
+        yield Finding("readme.download", INFO, f"The README tells players where else to download or how to install the port ('{dl.group(0).strip()[:60]}'). "
+                      "On PortMaster the port is installed by PortMaster itself, so this part only fits your own repository's README.",
+                      file=port.rel(p), fix="Keep Notes, Controls and Compile here; move download and install instructions to your repository.")
     for h in need:
         alt = ("compile", "build", "building") if h == "compile" else (h,)
         if not any(x.startswith(alt) for x in heads):
@@ -1136,7 +1142,10 @@ def reinvent_score(port, findings):
            "Blocks like these are hard to test on every CFW and stop working when a CFW changes, while PortMaster's files are kept up to date "
            "for all ports at once, so reviewers will ask for a shorter script built on them. Scripts like this usually come from an AI assistant "
            "that wasn't given PortMaster's conventions; using one is fine, it just needs the right reference.")
-    fix = ("1) Start from a merged port of the same engine (portmaster.games). "
+    peer, _ = peers.closest(text, exclude=port.gamedir.name if port.gamedir is not None else None)
+    example = f", or a merged port of the same kind such as {peer['name']}: {peers.url(peer)}" if peer else ""
+    tpl = templates.pick(text, [x.name for x in port.files()])[0]
+    fix = (f"1) Start from {templates.name(tpl)}{example}. "
            f"2) If you work with an AI assistant, give it the PortMaster porting reference pinned in #your-first-port ({data.FIRST_PORT_CHANNEL}). "
            "3) Replace each listed block with what PortMaster provides, and remove any block you can't explain; most merged scripts are short. "
            "4) If AI helped, mention it in the PR: that's welcome and helps the reviewers. Questions are welcome in #compile-help before you submit.")
@@ -1145,6 +1154,97 @@ def reinvent_score(port, findings):
     first = next((b for b in blocks if b[1]), None)
     return Finding("sh.reinvented", sev, msg, file=port.rel(s), line=first[1] if first and first[0] == port.rel(s) else 0, fix=fix,
                    snippet=snippet)
+
+
+@check
+def script_lean(port):
+    """Steps a shorter script would not need: copying the port's libraries into the game data, steam_appid.txt next to
+    a Steam stub, save copies inside the port folder, long custom functions, and length against the closest merged port."""
+    box64 = any(re.search(r"\bbox64\b", port.read_text(sc)) for sc in port.scripts)
+    stub = any(f.name.startswith("libsteam_api") and "gamedata" not in port.rel(f).lower() for f in port.files())
+    for s in port.scripts:
+        f = port.rel(s)
+        text = port.read_text(s)
+        code = [(n, l) for n, l in enumerate(text.splitlines(), 1) if not l.strip().startswith("#")]
+        if len([l for _, l in code if l.strip()]) <= 8:
+            continue
+        # the port's own libraries copied or moved into the player's game files on every launch
+        def _dest(l):
+            try:
+                toks = shlex.split(l.split(" #")[0])
+            except ValueError:
+                return ""
+            return toks[-1] if toks else ""
+        lib_moves = [(n, l) for n, l in code if re.match(r"\s*(\$\{?ESUDO\}?\s+)?(cp|mv)\b[^#]*\.so\b", l)
+                     and not re.search(r"\s/(tmp|dev)/|\$\{?(TMPDIR|RUNDIR)\b|\bmonodir\b|MONOMODDED|\.dll\.so", l)
+                     and not re.match(r"\s*(\$\{?ESUDO\}?\s+)?cp\b[^#]*\s/usr/lib", l)
+                     and not re.search(r"/libs?(\.[\w]+)?(/|$)", _dest(l))]   # within the port's own library folder
+        if lib_moves:
+            how = ("box64 loads them where they are: BOX64_LD_LIBRARY_PATH=\"$GAMEDIR/libs.x86_64\" for libraries and BOX64_LD_PRELOAD=\"$GAMEDIR/<stub>.so\" "
+                   "for a stub that has to win (as in the Papers, Please port)") if box64 else \
+                  "LD_LIBRARY_PATH (or LD_PRELOAD on the game's command) loads them from the port folder"
+            more = f" (also lines {', '.join(str(n) for n, _ in lib_moves[1:4])})" if len(lib_moves) > 1 else ""
+            yield Finding("sh.player-files", INFO, f"The script copies or renames libraries inside the game files on every launch{more}. "
+                          f"That changes the player's own copy of the game, and the step isn't needed: {how}.",
+                          file=f, line=lib_moves[0][0], fix="Load the libraries from the port folder and leave the game files as the player copied them.")
+        appid = next(((n, l) for n, l in code if re.search(r"(>|tee\s)\s*\"?[^\s\"]*steam_appid\.txt", l)), None)
+        if appid and stub:
+            yield Finding("sh.steam-appid", INFO, "The script writes steam_appid.txt, but the port ships its own libsteam_api stub; only Steam's real library reads that file.",
+                          file=f, line=appid[0], fix="Drop the line.")
+        # saves copied out of a folder inside the port and back in: that folder already lives on the SD card
+        conf_rx = r"\$\{?CONFDIR\}?|\$\{?GAMEDIR\}?/conf\b"
+        cps = [(n, m.group(0).strip()) for n, l in code for m in re.finditer(r"(?:^|;|&&|\bdo\b|\bthen\b)\s*(?:cp|rsync)\s[^;&|]+", l)]
+        to_conf = [n for n, c in cps if re.search(r"(" + conf_rx + r")[^\s\"]*/?\"?\s*$", c)]
+        from_conf = [n for n, c in cps if re.search(r"\s\"?(" + conf_rx + r")", c) and not re.search(r"(" + conf_rx + r")[^\s\"]*/?\"?\s*$", c)]
+        loops = [n for n, l in code if re.match(r"\s*for\s+\w+\s+in\s[^#]*(" + conf_rx + r")", l)]
+        if (to_conf and from_conf) or (to_conf and loops):
+            yield Finding("sh.save-mirror", INFO, "The script copies save files into conf/ and back. The folder the game writes to is already inside the port folder, "
+                          "so the saves are kept without the copies.", file=f, line=min(to_conf + from_conf + loops),
+                          fix="Let the game keep its saves where it writes them; use bind_directories only when the game writes outside the port folder.")
+        for name, (a, b) in _functions(code).items():
+            body = [l for n, l in code if a < n < b and l.strip()]
+            if len(body) > 20:
+                yield Finding("sh.long-function", INFO, f"{name}() is {len(body)} lines: a feature of its own inside the launch script. Reviewers will ask whether players need it; "
+                              "most merged scripts have no functions at all.", file=f, line=a,
+                              fix="Keep it only if the port needs it, and say in the PR what it does.")
+        # $HOTKEY is set per device by control.txt; gptokeyb2's default otherwise is Select (state.c)
+        hk = next(((n, l) for n, l in code if re.match(r"\s*(export\s+)?HOTKEY=", l)), None)
+        if hk:
+            yield Finding("sh.hotkey-override", WARN, "The script sets HOTKEY itself. control.txt sets it on the devices that need another button (L3 on the OGA 1.0 "
+                          "and Gameforce Chi, Guide on the RGB10 Max with ArkOS); elsewhere gptokeyb2 uses Select. A fixed value moves the exit combo on every "
+                          "other device, e.g. Guide + Start on handhelds without a Guide button.", file=f, line=hk[0], fix="Drop the line; control.txt picks the hotkey per device.")
+        # the port downloading its own updates: PortMaster installs and updates ports
+        upd = next(((n, l) for n, l in code if re.search(r"autoinstall|\b(curl|wget)\b[^#]*https?://|update\.py", l)
+                    and not re.search(r"harbourmaster|runtime_check", l)), None)
+        if upd:
+            yield Finding("sh.self-update", WARN, "The launch script fetches or installs updates by itself. PortMaster installs and updates ports, "
+                          "so a port that does it alone can bypass review and break when the device is offline.", file=f, line=upd[0],
+                          fix="Drop the update step and publish new versions through PortMaster.")
+        # every logic line that neither the engine's template, the documented patterns nor the closest merged port has
+        n_code = len([l for _, l in code if l.strip()])
+        k = peers.kind(peers.tags(text))
+        med = peers.kind_median(k)
+        limit = max(data.SCRIPT_P95, int(1.5 * med)) if med else data.SCRIPT_P99
+        peer, _ = peers.closest(text, exclude=port.gamedir.name if port.gamedir is not None else None)
+        keys = templates.pick(text, [x.name for x in port.files()])
+        extra = templates.extra_lines(text, keys, peer["keys"] if peer else (), frozenset(data.SCRIPT_LINES["lines"]))
+        ref = f"the closest merged port, {peer['name']} ({peers.url(peer)})" if peer else "merged ports"
+        length = (f"{n_code} lines of code, where merged {k.replace('+', ' + ')} ports have a median of {med or data.SCRIPT_MEDIAN}. ") if n_code > limit else ""
+        if len(extra) >= data.TEMPLATE_DIFF_MIN:
+            blocks = []
+            for n, raw in extra:
+                if blocks and n - blocks[-1][1] <= 2:
+                    blocks[-1][1] = n
+                else:
+                    blocks.append([n, n, raw])
+            shown = "; ".join((f"{a}-{b}" if a != b else f"{a}") + f" ({t[:45]}{'...' if len(t) > 45 else ''})" for a, b, t in blocks[:10])
+            more = f" and {len(blocks) - 10} more" if len(blocks) > 10 else ""
+            yield Finding("sh.template-diff", INFO, f"{length}{len(extra)} lines are in neither {templates.describe(keys)} nor {ref}: "
+                          f"lines {shown}{more}. Each can be right for this game; reviewers will ask what each one is for, and the ones PortMaster or the "
+                          "runtime already handle can go.", file=f, line=extra[0][0],
+                          fix="Put the script next to the example and the merged port; keep a block when a real device needs it, with a one-line comment saying which.")
+        elif length:
+            yield Finding("sh.length", INFO, f"{length}It follows its examples otherwise; compare it with {ref} to see what can be shorter.", file=f)
 
 
 @check

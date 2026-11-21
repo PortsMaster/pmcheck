@@ -31,8 +31,16 @@ ENGINES = (
     (".NET / Mono", lambda files, sh: "dotnet" in sh or "mono" in sh, ["### 1.7.11"]),
     ("box64 / box86", lambda files, sh: "box64" in sh or "box86" in sh, ["### 1.7.14"]),
     ("Java", lambda files, sh: "javaruntime" in sh or "zulu" in sh or "JAVA_HOME" in sh, ["### 1.7.15"]),
+    ("gl4es (standalone)", lambda files, sh: re.search(r"libgl_(\$\{?CFW_NAME|default)", sh) and "westonwrap" not in sh, ["### 1.7.3"]),
+    ("SDL3 via sdl3-sdl2-backend", lambda files, sh: "libsdl3.so.0" in files or "SDL3SHIM" in sh, ["### 1.7.12"]),
+    ("Allegro", lambda files, sh: any(n.startswith("liballeg") for n in files), ["### 1.7.16"]),
+    ("Qt6", lambda files, sh: "qt6" in sh.lower() or any(n.startswith("libqt6") for n in files), ["### 1.7.17"]),
+    ("OHRRPGCE", lambda files, sh: "ohrrpgce" in sh.lower() or any("ohrrpgce" in n for n in files), ["### 1.7.18"]),
+    ("Free Pascal (OpenSoldat)", lambda files, sh: "soldat" in sh.lower(), ["### 1.7.19"]),
+    ("Python 2 + pygame", lambda files, sh: "python2" in sh or any(n.startswith(("pygame", "libpython2")) for n in files), ["### 1.7.20"]),
 )
-ALWAYS = ["### 1.7.13"]                      # pm_message / pm_show_error
+NATIVE = ["### 1.7.2"]                       # plain native binary: the fallback when no engine matches
+ALWAYS = ["### 1.7.1", "### 1.7.13"]         # boilerplate header + conventions, pm_message / pm_show_error
 INI_SECTIONS = ["### 1.8.1"]                 # gptokeyb2 .ini
 
 
@@ -68,6 +76,9 @@ def engine_reference(port):
         if detect(files, sh):
             names.append(name)
             prefixes += secs
+    if not names:
+        names.append("native binary")
+        prefixes += NATIVE
     if any(n.endswith(".ini") for n in files) and "GPTOKEYB2" in sh:
         prefixes += INI_SECTIONS
     text = "\n\n".join(_sections(REFERENCE_FILE.read_text(), prefixes))[:MAX_REFERENCE_CHARS]
@@ -98,6 +109,25 @@ def _numbered(text):
     return "\n".join(f"{i:4}| {l}" for i, l in enumerate(text.splitlines(), 1))
 
 
+def _peer_script(port, timeout=10):
+    """The closest merged port's launch script (same kind of port), fetched from PortMaster-New, for a block-by-block comparison."""
+    from . import peers
+    if not port.scripts:
+        return ""
+    text = port.read_text(port.scripts[0])
+    peer, _ = peers.closest(text, exclude=port.gamedir.name if port.gamedir is not None else None)
+    if not peer:
+        return ""
+    try:
+        req = urllib.request.Request(peers.raw_url(peer), headers={"User-Agent": "pmcheck"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read(40_000).decode("utf-8", "replace")
+    except Exception:
+        return ""
+    return (f"## Closest merged port: {peer['name']} ({peers.url(peer)}), a merged script of the same kind\n"
+            "Compare the port's launch script with it block by block (see the prompt's comparison rule).\n```\n" + body + "\n```")
+
+
 def build_input(port, findings):
     parts = [f"Today's date: {datetime.date.today().isoformat()}. Dates up to today are not in the future.", "## File tree"]
     files = port.logical_files()
@@ -107,6 +137,14 @@ def build_input(port, findings):
     parts.append("\n".join(tree))
     parts.append("## Findings already reported by the rule checker (do not repeat or discuss these)")
     parts.append("\n".join(f"- [{f.severity}] {f.rule} {f.file}:{f.line} {f.message}" for f in findings) or "(none)")
+    if port.scripts:
+        from . import templates
+        sh = port.read_text(port.scripts[0])
+        for key in templates.pick(sh, [p.name for p in files])[:2]:
+            parts.append(f"## Template this kind of port should follow: {templates.name(key)}\n```\n{templates.text_of(key)}\n```")
+    peer_text = _peer_script(port)
+    if peer_text:
+        parts.append(peer_text)
     lic_dirs = [p for p in files if re.search(r"(^|/)licen[cs]es?/", port.rel(p))]
     budget = MAX_CHARS
     priority = sorted(

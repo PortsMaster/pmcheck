@@ -1,0 +1,152 @@
+{
+ "standard-basic": {
+  "name": "Basic",
+  "group": "Standard",
+  "tab": "Basic"
+ },
+ "standard-godot-3": {
+  "name": "Godot 3",
+  "group": "Standard",
+  "tab": "Godot 3"
+ },
+ "standard-love2d": {
+  "name": "Love2d",
+  "group": "Standard",
+  "tab": "Love2d"
+ },
+ "standard-gamemaker": {
+  "name": "GameMaker",
+  "group": "Standard",
+  "tab": "GameMaker"
+ },
+ "standard-pyxel": {
+  "name": "Pyxel",
+  "group": "Standard",
+  "tab": "Pyxel"
+ },
+ "standard-gl4es": {
+  "name": "gl4es",
+  "group": "Standard",
+  "tab": "gl4es"
+ },
+ "standard-patcher": {
+  "name": "Patcher",
+  "group": "Standard",
+  "tab": "Patcher"
+ },
+ "standard-gmloader-next": {
+  "name": "gmloader-next",
+  "group": "Standard",
+  "tab": "gmloader-next"
+ },
+ "standard-mkxp-z": {
+  "name": "mkxp-z",
+  "group": "Standard",
+  "tab": "mkxp-z"
+ },
+ "standard-ren-py": {
+  "name": "Ren'Py",
+  "group": "Standard",
+  "tab": "Ren'Py"
+ },
+ "standard-mono": {
+  "name": "Mono",
+  "group": "Standard",
+  "tab": "Mono"
+ },
+ "standard-net-8": {
+  "name": ".NET 8",
+  "group": "Standard",
+  "tab": ".NET 8"
+ },
+ "standard-box64": {
+  "name": "box64",
+  "group": "Standard",
+  "tab": "box64"
+ },
+ "standard-box86": {
+  "name": "box86",
+  "group": "Standard",
+  "tab": "box86"
+ },
+ "standard-rpg-maker-mv": {
+  "name": "RPG Maker MV",
+  "group": "Standard",
+  "tab": "RPG Maker MV"
+ },
+ "standard-unity": {
+  "name": "Unity",
+  "group": "Standard",
+  "tab": "Unity"
+ },
+ "westonpack-godot-4": {
+  "name": "Godot 4",
+  "group": "Westonpack",
+  "tab": "Godot 4"
+ },
+ "westonpack-java-no-gl-pure-xlib": {
+  "name": "Java (No GL, pure Xlib)",
+  "group": "Westonpack",
+  "tab": "Java"
+ },
+ "westonpack-java-opengl-2-1-through-mesapack-virgl": {
+  "name": "Java (OpenGL 2.1, through Mesapack/VirGL)",
+  "group": "Westonpack",
+  "tab": "Java"
+ },
+ "westonpack-libgdx": {
+  "name": "LibGDX",
+  "group": "Westonpack",
+  "tab": "LibGDX"
+ },
+ "westonpack-opengl-2-glx-gl4es": {
+  "name": "OpenGL 2 (GLX) (GL4ES)",
+  "group": "Westonpack",
+  "tab": "OpenGL 2 (GLX)"
+ },
+ "westonpack-opengl-2-glx-virgl": {
+  "name": "OpenGL 2 (GLX) (VirGL)",
+  "group": "Westonpack",
+  "tab": "OpenGL 2 (GLX)"
+ },
+ "westonpack-opengl-es-egl-x11": {
+  "name": "OpenGL ES (EGL/X11",
+  "group": "Westonpack",
+  "tab": "OpenGL ES (EGL/X11"
+ },
+ "westonpack-sdl2-opengl-2": {
+  "name": "SDL2 (OpenGL 2)",
+  "group": "Westonpack",
+  "tab": "SDL2"
+ },
+ "westonpack-sdl2-opengl-es": {
+  "name": "SDL2 (OpenGL ES)",
+  "group": "Westonpack",
+  "tab": "SDL2"
+ },
+ "westonpack-sfml-opengl-2": {
+  "name": "SFML (OpenGL 2)",
+  "group": "Westonpack",
+  "tab": "SFML"
+ },
+ "westonpack-sfml-opengl-es-1-1": {
+  "name": "SFML (OpenGL ES 1.1)",
+  "group": "Westonpack",
+  "tab": "SFML"
+ },
+ "westonpack-sfml-opengl-es-3-1": {
+  "name": "SFML (OpenGL ES 3.1)",
+  "group": "Westonpack",
+  "tab": "SFML"
+ },
+ "westonpack-xlib": {
+  "name": "Xlib",
+  "group": "Westonpack",
+  "tab": "Xlib"
+ },
+ "westonpack-box64": {
+  "name": "box64",
+  "group": "Westonpack",
+  "tab": "box64"
+ }
+}

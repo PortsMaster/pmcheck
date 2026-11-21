@@ -129,6 +129,8 @@ LIB_LICENCE_ALIASES = {"bz2": "bzip2", "crypto": "openssl", "ssl": "openssl", "l
 # Launch scripts that redo what PortMaster's own files already do (usually an AI assistant without PortMaster's
 # conventions). Calibrated on the 1536 merged scripts (2026-11-21): code lines median 38, p99 118; functions p99 1.
 SCRIPT_MEDIAN = 38
+SCRIPT_P95 = 77
+TEMPLATE_DIFF_MIN = 6   # sh.template-diff: merged ports have a median of 0 such lines, p90 5, p95 8
 SCRIPT_P99 = 118
 REINVENT_WARN = 7       # merged ports: only Moonlight (a streaming client) reaches 7
 REINVENT_ERROR = 10     # no merged port reaches 10

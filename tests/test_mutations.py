@@ -254,10 +254,27 @@ MUTATIONS = [
     ("two copies of one setup script", both(*(write(f"testgame/tools/{n}", "#!/bin/bash\n" + "".join(f'echo "step {i}: converting the game files, please wait"\n' for i in range(90)) + extra)
                                               for n, extra in (("patchscript", "echo 32\n"), ("patchscript64", "echo 64\n")))), "files.duplicate-script", "INFO"),
     ("ini with only [config] settings", lambda r: ini(r, "[config]\ndeadzone_mode = axial\ndeadzone = 2000\n\n[controls]\n"), "ini.empty", "INFO"),
+    # found in retrocityrampagedx
+    ("stub copied into the game files", both(write("testgame/libsteam_api.so", b"\x00"),
+                                             insert('box64_note=1 # box64\ncp -f "$GAMEDIR/libsteam_api.so" "$GAMEDIR/gamedata/x86_64/libsteam_api.so"\n')), "sh.player-files", "INFO"),
+    ("steam_appid.txt next to a stub", both(write("testgame/libsteam_api.so", b"\x00"), insert("printf '204630' > \"$GAMEDIR/gamedata/steam_appid.txt\"\n")),
+     "sh.steam-appid", "INFO"),
+    ("saves mirrored into conf and back", insert('CONFDIR="$GAMEDIR/conf"\nfor f in "$CONFDIR"/save*; do cp "$f" "$GAMEDIR/gamedata/"; done\n'
+                                                 'for f in "$GAMEDIR/gamedata"/save*; do cp -f "$f" "$CONFDIR/"; done\n'), "sh.save-mirror", "INFO"),
+    ("long custom function", insert("remap() {\n" + "".join(f"  echo {i}\n" for i in range(25)) + "}\nremap\n"), "sh.long-function", "INFO"),
+    ("README with a download section", write("testgame/README.md", "## Notes\nThanks!\n\n## Download\nGet the zip from the releases page.\n\n## Controls\n\n| Button | Action |\n"),
+     "readme.download", "INFO"),
+    # found in fearandhunger / felvidek (quixjs) and pokemonfulldex
+    ("HOTKEY set by the script", insert('export HOTKEY="${HOTKEY:-guide}"\n'), "sh.hotkey-override", "WARN"),
+    ("port downloads its own updates", insert('update="$(python3 update.py "$controlfolder/autoinstall")"\n'), "sh.self-update", "WARN"),
+    ("many lines no example or merged port has", insert("".join(f'if [ -f "$GAMEDIR/flag{i}" ]; then touch "$GAMEDIR/done{i}"; fi\n' for i in range(8))),
+     "sh.template-diff", "INFO"),
 ]
 
 # (name, change): valid ways of writing a port; must add no ERROR or WARN
 VALID = [
+    ("library copied within the port's libs folder", insert('cp -f "$GAMEDIR/libs/librk.so" "$GAMEDIR/libs/libmoonlight-rk.so"\n')),
+    ("MonoMod output renamed", insert('mv "$GAMEDIR/gamedata/MONOMODDED_Game.dll.so" "$GAMEDIR/gamedata/Game.dll.so"\n')),
     ("PORT_32BIT before mod_ for a 32-bit route", both(lambda r: sh(r, lambda s: s.replace('[ -f "${controlfolder}/mod_', '[ "$ROUTE" = 32 ] && export PORT_32BIT="Y"\n[ -f "${controlfolder}/mod_', 1)),
                                                    insert("LD_LIBRARY_PATH=/lib32:/usr/lib32 ./testgame.aarch64 --setup\n"))),
     ("lib32 appended by a 64-bit runtime", insert('export LD_LIBRARY_PATH="$GAMEDIR/libs:/usr/lib32:$LD_LIBRARY_PATH"\n')),
@@ -691,6 +708,64 @@ class Reinvented(unittest.TestCase):
         _, fs = self.rules(DW3_STYLE)
         md = markdown("testgame", fs)
         self.assertLess(md.index("Before the details: the launch script"), md.index("## "  + "\u274c") if "\u274c" in md else len(md))
+
+
+class LeanScriptNotes(unittest.TestCase):
+    def test_moves_inside_libs_are_not_player_files(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            insert('cp -f "$GAMEDIR/libs/librk.so" "$GAMEDIR/libs/libx.so"\nmv "$GAMEDIR/gamedata/MONOMODDED_G.dll.so" "$GAMEDIR/gamedata/G.dll.so"\n')(t)
+            self.assertNotIn("sh.player-files", {f.rule for f in findings(t)})
+
+    def test_closest_merged_port_for_box64_westonpack(self):
+        """retrocityrampagedx: a box64 + crusty script is compared with the box64/Westonpack example and a merged box64 port"""
+        from pmcheck import peers, templates
+        text = open(Path(__file__).parent / "fixtures" / "rcr_like.sh").read() if (Path(__file__).parent / "fixtures" / "rcr_like.sh").exists() else (
+            '#!/bin/bash\nweston_dir=/tmp/weston\nweston_runtime="weston_pkg_0.2"\n$ESUDO mount "$controlfolder/libs/${weston_runtime}.squashfs" "$weston_dir"\n'
+            '$ESUDO env $weston_dir/westonwrap.sh headless noop kiosk crusty_glx_gl4es "$GAMEDIR/box64" ./game\n')
+        self.assertEqual(templates.pick(text)[0], "site/westonpack-box64")
+        peer, _ = peers.closest(text)
+        self.assertIsNotNone(peer)
+        self.assertIn("box64", peer["tags"])
+
+
+class Templates(unittest.TestCase):
+    def test_every_template_parses(self):
+        from pmcheck import templates
+        for p in sorted((templates.HERE / "site").glob("*.sh")) + sorted((templates.HERE / "new").glob("*.sh")):
+            key = f"{p.parent.name}/{p.stem}"
+            self.assertTrue(templates.keys_of(key), key)
+            self.assertTrue(p.read_text().startswith("#!/bin/bash"), key)
+        self.assertGreaterEqual(len(templates.site_index()), 30)
+
+    def test_pick_by_kind(self):
+        from pmcheck import templates
+        cases = {
+            "./ua_host64 \"$GAMEDIR/arm64\"": "site/standard-unity",
+            "./quixjs.${DEVICE_ARCH} --launcher -c port.toml": "site/standard-rpg-maker-mv",
+            "$weston_dir/westonwrap.sh headless noop kiosk crusty_glx_gl4es \"$GAMEDIR/box64\" ./game": "site/westonpack-box64",
+            "$weston_dir/westonwrap.sh headless noop kiosk crusty_x11egl $godot_dir/godot45": "site/westonpack-godot-4",
+            "./gmloadernext.aarch64 -c gmloader.json": "site/standard-gmloader-next",
+            "\"$GAMEDIR/box64/box64\" ./game.x86_64": "site/standard-box64",
+            "\"$GAMEDIR/box86/box86\" ./game.x86": "site/standard-box86",
+            "export MONO_PATH=\"$GAMEDIR/dlls\"": "site/standard-mono",
+            "./testgame.aarch64": "site/standard-basic",
+        }
+        for line, want in cases.items():
+            self.assertEqual(templates.pick("#!/bin/bash\n" + line + "\n")[0], want, line)
+
+    def test_new_templates_are_clean(self):
+        """the templates themselves must pass pmcheck's script rules (they are what porters copy)"""
+        from pmcheck import templates
+        ours = ["standard-gl4es", "standard-patcher", "standard-gmloader-next", "standard-mkxp-z", "standard-ren-py", "standard-mono",
+                "standard-net-8", "standard-box64", "standard-box86", "standard-rpg-maker-mv", "standard-unity", "westonpack-box64"]
+        for key in ["new/basic"] + [f"site/{k}" for k in ours]:
+            with self.subTest(key), tempfile.TemporaryDirectory() as t:
+                make_port(t)
+                body = templates.text_of(key).replace("portfolder", "testgame").replace("portexecutable", "testgame")
+                (Path(t) / "Test Game.sh").write_text(body)
+                bad = [f"{f.rule} {f.line} {f.message[:80]}" for f in findings(t) if f.severity in ("ERROR", "WARN") and f.rule.startswith("sh.") and f.rule != "sh.gptk-missing"]   # the example .ini is the port's own
+                self.assertEqual(bad, [], key)
 
 
 class SoTokens(unittest.TestCase):
