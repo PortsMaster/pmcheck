@@ -842,11 +842,14 @@ def debug_symbols(port):
         if saved >= 512 * 1024:
             (debug if has_debug else syms).append((p, saved))
     mb = lambda b: f"{b / 1048576:.1f} MB"
-    for hits, sev, what in ((debug, WARN, "debug info"), (syms, INFO, "symbol tables (not stripped)")):
+    for hits, what in ((debug, "debug info"), (syms, "symbol tables (not stripped)")):
         if not hits:
             continue
         hits.sort(key=lambda h: -h[1])
         total = sum(s for _, s in hits)
+        if total < data.STRIP_MIN:
+            continue   # a few MB are not worth a rebuild
+        sev = WARN if total >= data.STRIP_WARN else INFO
         before = sum(p.stat().st_size for p, _ in hits)
         shown = ", ".join(f"{port.rel(p)} ({mb(s)})" for p, s in hits[:6]) + (f" and {len(hits) - 6} more" if len(hits) > 6 else "")
         yield Finding("bin.debug", sev, f"Binaries ship with {what}; strip would save {mb(total)} of {mb(before)}: {shown}.",
@@ -1317,16 +1320,32 @@ def script_platform(port):
         assigns = _assigns(code)
         parts = _script_parts(port, s, code)
         all_code = "\n".join(l for _, c in parts for _, l in c)
-        uses_msg = re.search(r"\bpm_message\b", all_code)   # pm_message_end gives the last card its time; pm_show_error blocks by itself
-        for where, c in parts if uses_msg else []:
-            for n, l in c:
-                if re.match(r"\s*trap\s+.*\bEXIT\b", l) and "pm_message_end" not in l and "pm_finish" not in l:
-                    handler = re.match(r"\s*trap\s+[\"']?(\w+)", l)
-                    hb = funcs.get(handler.group(1)) if handler else None
-                    if hb and any(re.search(r"\bpm_(message_end|finish)\b", x) for k, x in code if hb[0] < k <= hb[1]):
-                        continue
-                    yield Finding("sh.trap-exit", INFO, "trap ... EXIT replaces funcs.txt's own trap pm_message_end EXIT, so a pm_message card no longer gets its time on screen when the script ends.",
-                                  file=where, line=n, fix="Add it to the trap: trap '<your cleanup>; pm_message_end' EXIT")
+        # funcs.txt's EXIT trap is pm_message_end; pm_finish calls it too. Replacing the trap only loses something when, after
+        # it, a pm_message is followed by an exit without pm_finish (the card is cut off).
+        def _bare_exit_after_msg(lines):
+            for i, (k, x) in enumerate(lines):
+                if re.search(r"\bpm_message\b(?!_)", x):
+                    for _, y in lines[i + 1:i + 6]:
+                        if re.search(r"\bpm_finish\b", y):
+                            break
+                        if re.match(r"\s*exit\b", y):
+                            return k
+            return None
+        for n, l in code:
+            if not re.match(r"\s*trap\s+.*\bEXIT\b", l) or "pm_message_end" in l or "pm_finish" in l:
+                continue
+            handler = re.match(r"\s*trap\s+[\"']?(\w+)", l)
+            hb = funcs.get(handler.group(1)) if handler else None
+            if hb and any(re.search(r"\bpm_(message_end|finish)\b", x) for k, x in code if hb[0] < k <= hb[1]):
+                continue
+            after = [(k, x) for k, x in code if k > n and not any(a <= k <= b for a, b in funcs.values())]
+            called = {name for name in funcs if any(re.match(r"\s*" + re.escape(name) + r"\b", x) for _, x in after)}
+            bodies = [[(k, x) for k, x in code if funcs[name][0] < k < funcs[name][1]] for name in called]
+            hit = _bare_exit_after_msg(after) or next((h for h in map(_bare_exit_after_msg, bodies) if h), None)
+            if hit:
+                yield Finding("sh.trap-exit", INFO, "`trap ... EXIT` replaces funcs.txt's own `trap pm_message_end EXIT`, and the message on line "
+                              f"{hit} is followed by an exit without `pm_finish`, so the card is cut off.",
+                              file=f, line=n, fix="Add it to the trap: `trap '<your cleanup>; pm_message_end' EXIT`, or call `pm_finish` before that exit.")
         for where, c in parts:
             hit = next(((n, l) for n, l in c if re.search(r"\b(swapon|mkswap|zramctl)\b|/sys/block/zram|modprobe\s+zram", l)), None)
             if hit:

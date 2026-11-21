@@ -175,3 +175,7 @@ REINVENT_RULES = {
     "sh.controlfolder", "sh.mod", "sh.get_controls", "sh.pm_finish", "sh.swap", "sh.home", "sh.sdl-driver", "sh.trap-exit",
     "sh.setup-helper", "files.duplicate-script", "sh.no-gptokeyb", "sh.kill-gptokeyb", "sh.tty-message",
 }
+
+# bin.debug: strip only pays off for real savings
+STRIP_MIN = 5 * 1048576     # below this, no finding
+STRIP_WARN = 20 * 1048576   # from here a warning, between the two a note

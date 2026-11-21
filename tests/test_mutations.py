@@ -135,7 +135,6 @@ MUTATIONS = [
     ("oga_events restart", insert("$ESUDO systemctl restart oga_events &\n"), "sh.old-cleanup", "WARN"),
     ("old cleanup tail", lambda r: sh(r, lambda s: s.replace("pm_finish\n", 'unset SDL_GAMECONTROLLERCONFIG\nprintf "\\033c" > /dev/tty0\n')), "sh.old-cleanup", "WARN"),
     ("unset at the end with pm_finish", lambda r: sh(r, lambda s: s.replace("pm_finish\n", "unset SDL_GAMECONTROLLERCONFIG\npm_finish\n")), "sh.old-cleanup", "WARN"),
-    ("binary with debug info", lambda r: shutil.copy(FIX / "hellodebug.aarch64", gd(r) / "testgame.aarch64"), "bin.debug", "WARN"),
     # port.json
     ("port.json broken", write("testgame/port.json", "{ not json"), "port.json.parse", "ERROR"),
     ("port.json name", lambda r: pj(r, _name="other.zip"), "port.json.name", "WARN"),
@@ -247,7 +246,8 @@ MUTATIONS = [
     ("PORT_32BIT after mod_", insert('export PORT_32BIT="Y"\nLD_LIBRARY_PATH=/lib32:/usr/lib32 ./testgame.aarch64 --setup\n'), "sh.port-32bit", "WARN"),
     ("own 32-bit userland test", insert('[ -e /lib/ld-linux-armhf.so.3 ] && echo "32-bit libraries"\n'), "sh.has-armhf", "INFO"),
     ("pm_finish before the game", insert('pm_finish\necho "now the game"\n'), "sh.pm-finish-mid", "WARN"),
-    ("EXIT trap without pm_message_end", insert('pm_message "Starting"\ntrap "rm -f $GAMEDIR/lock" EXIT\n'), "sh.trap-exit", "INFO"),
+    ("EXIT trap, then a message cut off by exit", insert('trap "rm -f $GAMEDIR/lock" EXIT\nif [ ! -f x ]; then\n  pm_message "x is missing"\n  sleep 5\n  exit 1\nfi\n'),
+     "sh.trap-exit", "INFO"),
     ("swap set up by the script", insert("$ESUDO swapon /dev/zram0\n"), "sh.swap", "INFO"),
     ("swap in a sourced helper", both(write("testgame/swap.txt", "swap_on() {\n  $ESUDO mkswap /dev/zram1\n}\n"), insert('source "$GAMEDIR/swap.txt"\n')), "sh.swap", "INFO"),
     ("long first-run helper", both(write("testgame/setup.py", "\n".join(f"print({i})" for i in range(320)) + "\n"), insert('python3 "$GAMEDIR/setup.py" --pending\n')), "sh.setup-helper", "INFO"),
@@ -273,6 +273,8 @@ MUTATIONS = [
 
 # (name, change): valid ways of writing a port; must add no ERROR or WARN
 VALID = [
+    ("EXIT trap after the extraction message (berusky2)", insert('pm_message "Extracting"\ntrap "swaymsg seat x hide_cursor 1000" EXIT\n')),
+    ("EXIT trap, message then pm_finish then exit (ghostship)", insert('trap "swap_off" EXIT\nif [ ! -f x ]; then\n  pm_message "x"\n  sleep 5\n  pm_finish\n  exit 0\nfi\n')),
     ("library copied within the port's libs folder", insert('cp -f "$GAMEDIR/libs/librk.so" "$GAMEDIR/libs/libmoonlight-rk.so"\n')),
     ("MonoMod output renamed", insert('mv "$GAMEDIR/gamedata/MONOMODDED_Game.dll.so" "$GAMEDIR/gamedata/Game.dll.so"\n')),
     ("PORT_32BIT before mod_ for a 32-bit route", both(lambda r: sh(r, lambda s: s.replace('[ -f "${controlfolder}/mod_', '[ "$ROUTE" = 32 ] && export PORT_32BIT="Y"\n[ -f "${controlfolder}/mod_', 1)),
@@ -794,6 +796,25 @@ class RagingThunderLike(unittest.TestCase):
         from pmcheck import data
         hits = {k for k, rx, need, _, _ in data.REINVENT_SIGNALS if len(re.findall(rx, text, re.M)) >= need}
         self.assertTrue({"pm-guards", "gamedir-search", "system-libpath", "script-dir"} <= hits, hits)
+
+
+class StripThreshold(unittest.TestCase):
+    def rules(self, strip_min, strip_warn):
+        from unittest import mock
+        import pmcheck.data as data
+        with tempfile.TemporaryDirectory() as t, mock.patch.object(data, "STRIP_MIN", strip_min), mock.patch.object(data, "STRIP_WARN", strip_warn):
+            make_port(t)
+            shutil.copy(FIX / "hellodebug.aarch64", gd(t) / "testgame.aarch64")
+            return {(f.rule, f.severity) for f in findings(t)}
+
+    def test_small_savings_are_not_reported(self):
+        """berusky2: 4 MB of debug info in gl4es is not worth a rebuild"""
+        got = self.rules(5 * 1048576, 20 * 1048576)
+        self.assertFalse({r for r in got if r[0] == "bin.debug"}, got)
+
+    def test_note_and_warning_by_size(self):
+        self.assertIn(("bin.debug", "INFO"), self.rules(1, 1 << 40))
+        self.assertIn(("bin.debug", "WARN"), self.rules(1, 2))
 
 
 class SoTokens(unittest.TestCase):
