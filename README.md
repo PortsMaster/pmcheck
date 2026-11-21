@@ -27,6 +27,7 @@ Exit codes: 0 ok, 1 errors found (0 with `--warn-only`), 2 could not load.
 The AI prompt is `pmcheck/prompt/rules.md`, so admins can edit it without touching code.
 gptokeyb2 key names: `pmcheck/g2keys.json`, generated from `gptokeyb2/src/keys.c`.
 Standard launch-script lines (`sh.nonstandard`): `pmcheck/script_lines.json`, normalized lines found in at least 10 merged PortMaster-New scripts plus the percentiles of non-standard lines per merged port. Refresh it with `tools/build_script_lines.py` (instructions at the top of the file) when the template changes.
+Scripts that redo PortMaster's own work (`sh.reinvented`, shown first in the report): a score from script length, shell functions, a generator banner, the blocks in `data.REINVENT_SIGNALS` (each with what PortMaster provides instead) and the related findings in `data.REINVENT_RULES`. WARN at `REINVENT_WARN`, ERROR at `REINVENT_ERROR`, calibrated so no merged port reaches ERROR. The text is read by the porter: it describes the script, never the person.
 
 ## Bot deployment (build server)
 ```bash

@@ -124,3 +124,43 @@ MARKDOWN_GENERATOR = "https://portmaster.games/tools/markdown-generator/"
 
 # library name stem -> the project name its licence file is usually named after
 LIB_LICENCE_ALIASES = {"bz2": "bzip2", "crypto": "openssl", "ssl": "openssl", "lzma": "xz", "z": "zlib"}
+
+# ---------------------------------------------------------------- sh.reinvented
+# Launch scripts that redo what PortMaster's own files already do (usually an AI assistant without PortMaster's
+# conventions). Calibrated on the 1536 merged scripts (2026-11-21): code lines median 38, p99 118; functions p99 1.
+SCRIPT_MEDIAN = 38
+SCRIPT_P99 = 118
+REINVENT_WARN = 7       # merged ports: only Moonlight (a streaming client) reaches 7
+REINVENT_ERROR = 10     # no merged port reaches 10
+FIRST_PORT_CHANNEL = "https://discord.com/channels/1122861252088172575/1232622554984878120"
+# (key, regex over code lines, hits needed, what the block does, what PortMaster already provides)
+REINVENT_SIGNALS = [
+    ("cfw-detect", r"/etc/os-release|\.config/\.OS\b|plymouth|/proc/device-tree/model|/boot/[\w./-]*\.dtb", 2,
+     "works out the CFW from os-release, plymouth or device files", "$CFW_NAME is already set by device_info.txt"),
+    ("arch-detect", r"\buname\s+-m\b|ld-linux-aarch64\.so|ld-linux-armhf\.so\.3", 1,
+     "works out the CPU architecture itself", "$DEVICE_ARCH and $DEVICE_HAS_ARMHF are already set by device_info.txt"),
+    ("ldd-check", r"(^|[\s;|(])ldd(32|_32)?\s|\s--list\s", 1,
+     "checks the game's libraries with ldd", "nothing is needed: a missing library already shows up in log.txt"),
+    ("cpu-probe", r"/proc/cpuinfo", 1,
+     "reads /proc/cpuinfo to pick settings", "$DEVICE_CPU and $DEVICE_RAM are already set by device_info.txt"),
+    ("fb0-write", r"of=/dev/fb\d|>\s*/dev/fb\d", 1,
+     "writes to the framebuffer directly", "SDL2 draws the screen and pm_finish hands it back to the frontend"),
+    ("shell-reexec", r"BASH_VERSION|exec\s+bash\b", 1,
+     "restarts itself under bash", "PortMaster always starts launch scripts with bash (#!/bin/bash)"),
+    ("signal-traps", r"^\s*trap\b.*\b(INT|TERM|HUP)\b", 1,
+     "sets its own signal traps", "pm_finish cleans up, and funcs.txt already sets the exit trap"),
+    ("resource-pm", r"(source|\.)\s+\"?\$\{?controlfolder\}?/funcs\.txt|unset\s+PM_FUNCS_VERSION", 1,
+     "loads funcs.txt again", "control.txt already loads funcs.txt once"),
+    ("controlfolder-extra", r"controlfolder=\"?/(PortMaster|mnt/|storage/|var/|roms2?/tools)|PortMaster\"\s+\"/", 1,
+     "searches more places for PortMaster", "the template's four-path controlfolder block finds it on every CFW"),
+    ("sysctl-write", r"(tee|>)\s*/proc/sys/|sysctl\s+-w", 1,
+     "changes kernel settings", "ports leave kernel settings to the CFW"),
+    ("esudo-env", r"\$\{?ESUDO\}?\s+env\s", 1,
+     "runs the game as root through $ESUDO env", "the game runs as the normal user; $ESUDO is only for mount and chmod"),
+]
+# existing findings that are themselves PortMaster work done again
+REINVENT_RULES = {
+    "sh.boilerplate", "sh.env-knobs", "sh.libgl-manual", "sh.gpu-probe", "sh.has-armhf", "sh.device-info", "sh.uinput",
+    "sh.controlfolder", "sh.mod", "sh.get_controls", "sh.pm_finish", "sh.swap", "sh.home", "sh.sdl-driver", "sh.trap-exit",
+    "sh.setup-helper", "files.duplicate-script", "sh.no-gptokeyb",
+}

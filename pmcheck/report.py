@@ -1,4 +1,5 @@
 import json
+import re
 
 from . import __version__
 from .findings import ERROR, WARN, INFO, ORDER
@@ -26,9 +27,16 @@ def md(text):
 
 
 def markdown(name, findings, ai=None):
-    fs = sorted(findings, key=lambda f: (ORDER[f.severity], f.file, f.line))
+    lead = [f for f in findings if f.rule == "sh.reinvented"]
+    fs = sorted((f for f in findings if f.rule != "sh.reinvented"), key=lambda f: (ORDER[f.severity], f.file, f.line))
     out = [f"# pmcheck {__version__}: {name}", "", f"**{summary_line(findings)}**", ""]
     icon = {ERROR: "❌", WARN: "⚠️", INFO: "ℹ️"}
+    for f in lead:   # the launch script as a whole comes before the single findings
+        out += [f"## 📋 Before the details: the launch script ({f.severity})", "", md(f.message), ""]
+        if f.snippet:
+            out += ["What PortMaster already provides for each block:", "", "```", *f.snippet.splitlines(), "```", ""]
+        steps = [x.strip() for x in re.split(r"\s*\d\)\s+", f.fix) if x.strip()]
+        out += [f"{i}. {md(x)}" for i, x in enumerate(steps, 1)] + [""]
     for sev in (ERROR, WARN, INFO):
         group = [f for f in fs if f.severity == sev]
         if not group:
