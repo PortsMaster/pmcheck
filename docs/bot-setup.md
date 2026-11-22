@@ -168,7 +168,10 @@ systemctl --user restart pmcheck-bot
 | `AI review skipped: no GEMINI_API_KEY` | The key is missing from the env file. |
 | `AI review unavailable (HTTP 503 ...)` | Google's free Flash model is overloaded. The bot retries twice (5 s, 20 s), then falls back to `gemini-flash-lite-latest` (`PMCHECK_GEMINI_FALLBACK`, empty disables it). If all fail, run the check again later; the rules report is complete either way. |
 | A PR link answers `input is not a zip file or folder` | The bot is older than 0.1.4. Pull, rebuild and restart (step 12), then check `journalctl`: a PR check logs `/checkport PR #<n>`. |
-| `GitHub API rate limit reached` | More than 60 GitHub API calls in an hour from the server; set `GITHUB_TOKEN`. |
+| `GitHub API rate limit reached (..., no GITHUB_TOKEN set ...)` | More than 60 GitHub API calls in an hour from the server; set `GITHUB_TOKEN`. |
+| `GitHub API rate limit reached (5000 requests/hour for this GITHUB_TOKEN)` | The token's hourly limit was used up; wait for the reset. |
+| `GitHub's secondary rate limit stopped the downloads` | Big PRs (many MB of blobs) can trip GitHub's burst limit even with a token. The bot already waits and retries; run the check again a few minutes later. |
+| `GitHub returned HTTP 403 ...: <message>` | GitHub's own reason follows the colon (e.g. the token has no access to that repo). |
 | `GitHub is rate limiting file downloads (HTTP 429)` | raw.githubusercontent.com limits anonymous downloads per IP; set `GITHUB_TOKEN`. |
 | `AI review unavailable (no answer ... within 150s)` | The model hung; the bot already tried the fallback model. Run the check again. |
 | `AI review unavailable (HTTP 404 ...)` | The model name is retired; set `PMCHECK_GEMINI_MODEL=gemini-flash-latest` and restart. |

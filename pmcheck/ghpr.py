@@ -42,17 +42,28 @@ def _get(url, raw=False, timeout=60, tries=5, accept="application/vnd.github+jso
             with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as r:
                 return r.read() if raw else json.load(r)
         except urllib.error.HTTPError as e:
-            # 429 (raw.githubusercontent.com) and 5xx are temporary: wait as told (capped), then retry
-            if (e.code == 429 or e.code >= 500) and attempt < tries - 1:
-                wait = e.headers.get("Retry-After", "")
-                time.sleep(min(int(wait), 60) if wait.isdigit() else 2 ** attempt * 3)
+            try:
+                msg = json.loads(e.read(4096) or b"{}").get("message", "") if url.startswith(API) else ""
+            except (ValueError, OSError, AttributeError):
+                msg = ""
+            wait = e.headers.get("Retry-After", "")
+            exhausted = e.headers.get("X-RateLimit-Remaining") == "0"
+            # 429, 5xx and GitHub's secondary rate limit (403 + Retry-After or "secondary" in the message,
+            # hit by bursts of large blob downloads even with a token) are temporary: wait, then retry
+            secondary = e.code == 403 and not exhausted and (wait or "secondary" in msg.lower())
+            if (e.code == 429 or e.code >= 500 or secondary) and attempt < tries - 1:
+                time.sleep(min(int(wait), 60) if wait.isdigit() else 2 ** attempt * 5)
                 continue
-            if e.code in (403, 429) and url.startswith(API):
-                raise PRError("GitHub API rate limit reached (60 requests/hour without GITHUB_TOKEN); try again later.")
+            if url.startswith(API) and (exhausted or (e.code == 403 and not token)):
+                if not token:
+                    raise PRError("GitHub API rate limit reached (60 requests/hour, no GITHUB_TOKEN set in the bot's env file); try again later.")
+                raise PRError("GitHub API rate limit reached (5000 requests/hour for this GITHUB_TOKEN); try again later.")
+            if secondary:
+                raise PRError("GitHub's secondary rate limit stopped the downloads (too many large requests at once); try again in a few minutes.")
             if e.code == 429:
                 raise PRError("GitHub is rate limiting file downloads (HTTP 429); try again in a few minutes"
                               + ("." if token else ", or set GITHUB_TOKEN in the bot's env file."))
-            raise PRError(f"GitHub returned HTTP {e.code} for {url.split('?')[0]}")
+            raise PRError(f"GitHub returned HTTP {e.code} for {url.split('?')[0]}" + (f": {msg}" if msg else ""))
         except (urllib.error.URLError, TimeoutError) as e:
             if attempt < tries - 1:
                 time.sleep(2 ** attempt * 3)
@@ -138,6 +149,6 @@ def fetch(url, dest, max_bytes, log=print):
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(data)
 
-    with ThreadPoolExecutor(4) as ex:
+    with ThreadPoolExecutor(2) as ex:
         list(ex.map(one, jobs))
     return info, [dest / name for name in names if (dest / name).is_dir()]
