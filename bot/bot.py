@@ -4,7 +4,7 @@ Env (see config.example.env):
   DISCORD_TOKEN, GUILD_ID, ADMIN_ROLE_IDS (comma separated), GEMINI_API_KEY,
   PMCHECK_GEMINI_MODEL (optional), MAX_DOWNLOAD_MB (default 1024),
   CHECK_DEADLINE (default 780: seconds for download + checks; Discord drops the reply after 15 minutes),
-  GITHUB_TOKEN (read-only; PR links download each file through the GitHub API, raw downloads get HTTP 429)
+  GITHUB_TOKEN (optional, read-only; PR files come over git, the token only helps the GitHub API fallback)
 """
 import asyncio
 import io

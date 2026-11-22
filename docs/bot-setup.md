@@ -80,10 +80,10 @@ GITHUB_TOKEN=<token from "GitHub token" below>
 ```
 - `gemini-flash-latest` follows Google's current Flash model, so retirements don't break it. To pin a model, list the ones your key can use:
   `curl -s -H "x-goog-api-key: $GEMINI_API_KEY" https://generativelanguage.googleapis.com/v1beta/models | grep '"name"'`
-- `GITHUB_TOKEN` is needed for PR links in practice. A check makes about 5 API calls plus one per file. With a token the files come from the GitHub API (5000 calls per hour). Without one, the API allows 60 calls per hour per server IP, and the files come from raw.githubusercontent.com, which answers HTTP 429 once an IP downloads too much. Steps below.
+- `GITHUB_TOKEN` is optional. PR files come over anonymous git (HTTPS), which doesn't count against the GitHub API limit; a check makes one API call, for the PR title. The token only matters when git can't reach GitHub and the bot falls back to the API (about 5 calls plus one per file; 60 per hour per IP without a token, 5000 with one). Steps below.
 - The bot refuses to start when `ADMIN_ROLE_IDS` is empty.
 
-### GitHub token (for PR links)
+### GitHub token (optional, for the API fallback)
 1. Open https://github.com/settings/personal-access-tokens. You can also get there from your avatar (top right) → **Settings** → **Developer settings** at the bottom of the left menu → **Personal access tokens** → **Fine-grained tokens**.
 2. Click **Generate new token**.
 3. Fill in the form:
@@ -168,6 +168,7 @@ systemctl --user restart pmcheck-bot
 | `AI review skipped: no GEMINI_API_KEY` | The key is missing from the env file. |
 | `AI review unavailable (HTTP 503 ...)` | Google's free Flash model is overloaded. The bot retries twice (5 s, 20 s), then falls back to `gemini-flash-lite-latest` (`PMCHECK_GEMINI_FALLBACK`, empty disables it). If all fail, run the check again later; the rules report is complete either way. |
 | A PR link answers `input is not a zip file or folder` | The bot is older than 0.1.4. Pull, rebuild and restart (step 12), then check `journalctl`: a PR check logs `/checkport PR #<n>`. |
+| `git fetch failed: ...` / `git checkout failed: ...` | git's own last error line follows. A log line `git fetch unavailable (...); using the GitHub API` means git couldn't reach GitHub and the API fallback ran instead. |
 | `GitHub API rate limit reached (..., no GITHUB_TOKEN set ...)` | More than 60 GitHub API calls in an hour from the server; set `GITHUB_TOKEN`. |
 | `GitHub API rate limit reached (5000 requests/hour for this GITHUB_TOKEN)` | The token's hourly limit was used up; wait for the reset. |
 | `GitHub's secondary rate limit stopped the downloads` | Big PRs (many MB of blobs) can trip GitHub's burst limit even with a token. The bot already waits and retries; run the check again a few minutes later. |
