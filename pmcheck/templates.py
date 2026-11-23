@@ -116,7 +116,7 @@ def extra_lines(text, keys, peer_keys=(), common=frozenset()):
     peer = set(peer_keys)
     out = []
     for n, k, raw in scriptnorm.lines(text):
-        if k in ok or k in common or k in scriptnorm.TEMPLATE or scriptnorm.exempt(k) or scriptnorm.DOCUMENTED.match(raw):
+        if k in ok or k in common or k in scriptnorm.TEMPLATE or scriptnorm.exempt(k, raw) or scriptnorm.DOCUMENTED.match(raw):
             continue
         if scriptnorm.SYSTEM.search(raw) or hashlib.sha1(k.encode()).hexdigest()[:8] in peer:
             continue

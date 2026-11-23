@@ -1250,8 +1250,8 @@ def script_lean(port):
                 else:
                     blocks.append([n, n, raw])
             compare = f"Compare it with {templates.describe(keys)}" + (f" and with {peer['name']}, the closest merged port: {peers.url(peer)}" if peer else "")
-            yield Finding("sh.template-diff", INFO, f"{length}{len(extra)} lines are in neither the template nor the closest merged port; they are listed below. "
-                          "Each can be right for this game, but reviewers will ask what each one is for, and the ones PortMaster or the runtime already handle can go.",
+            yield Finding("sh.template-diff", INFO, f"{length}Nothing below is an error. {len(extra)} lines differ from the template and the closest merged port, so reviewers will ask what each one is for. "
+                          "The ones PortMaster or the runtime already handle can go; the rest are fine with a one-line comment.",
                           file=f, line=extra[0][0], snippet=_listing(blocks),
                           fix=f"{compare}. Keep a block when a real device needs it, with a one-line comment saying which.")
         elif length:
@@ -1628,8 +1628,14 @@ def _script(port, s):
             yield Finding("sh.echo-message", WARN, "This message goes to the log, the player never sees it before the exit.", file=f, line=n,
                           fix='pm_message "..." then sleep 5 before the exit (works on every PortMaster version)')
     launch = re.compile(r"^\s*(?:\w+=\S+\s+)*(?:\$\{?TASKSET\}?\s+|\$ESUDO\s+)?(?:\"?\$\{?GAMEDIR\}?/|\./|\"?\$\{?BINARY\}?\b|mono\b|java\b|\$\{?LOVE_RUN\}?|\$\{?GMLOADER\}?)")
-    for n, l in code:
+    text_cmd = re.compile(r"\s*(printf|echo|cat)\b")
+    for i, (n, l) in enumerate(code):
         if not launch.match(l):
+            continue
+        j = i   # a printf/echo/cat continued over lines writes a file, whatever its last line starts with
+        while j > 0 and code[j - 1][1].rstrip().endswith("\\"):
+            j -= 1
+        if text_cmd.match(code[j][1]):
             continue
         for m in re.finditer(r"(?:^|\s)(?:[12&]?>>?)\s*\"?([^\"\s;&|)]+)", l):
             target = m.group(1)

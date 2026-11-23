@@ -47,16 +47,36 @@ def norm(line, port):
                lambda m: (m.group(1) or "") + (m.group(2) if m.group(2) in KNOWN or m.group(2).startswith(data.PM_ENV_PREFIX) else "V") + "=", l)
     l = re.sub(r"[^\s=:;|&<>()\[\]]*/[^\s=:;|&<>()\[\]]*", "P", l)
     l = re.sub(r"\b\d+(\.\d+)*\b", "N", l)
-    return re.sub(r"\s+", " ", l)
+    l = re.sub(r"\s+", " ", l)
+    if re.match(r"(\$ESUDO )?(chmod|mkdir|rm|touch)\b", l):   # the same command over two files or folders is the template's line
+        l = re.sub(r"( \S+)\1\b", r"\1", l)
+    return l
 
 
-def exempt(k):
-    """Game-specific lines every port has in its own form: plain assignments, launches, block ends."""
+def exempt(k, raw=""):
+    """Game-specific lines every port has in its own form: plain assignments, launches, block ends, control flow, tests of the port's own files.
+    raw lets a line that reaches into the system (a CFW check, /etc, /sys ...) stay visible."""
     if re.fullmatch(r"(export\s+)?V=[^$`|;&]*", k) or re.fullmatch(r"(export\s+)?V=(P|\$V|\$GAMEDIR\S*)", k):
+        return True
+    if re.fullmatch(r"(export\s+)?(GAMEDIR|CONFDIR|BINARY)=[^$`|;&]*", k):   # BINARY=dhewmN: the game's own name
+        return True
+    if re.fullmatch(r"V=\$\(P( [^()]*)?\)", k):   # GAME=$(./launcher "$GAMEDIR"): the port's own helper program
         return True
     if re.match(r"(\$TASKSET\s+)?(\./|\$GAMEDIR/|P\b|\$V\b|\$BINARY|mono\b|java\b|box64\b|box86\b|\$GPTOKEYB2?\b|pm_platform_helper\b)", k):
         return True
-    return bool(re.fullmatch(r"fi|else|done|esac|;;|\}|then|do", k))
+    if re.fullmatch(r"fi|else|done|esac|;;|\}|then|do|continue|break|while (true|:); do|exit( \S+)?|return( \S+)?", k):
+        return True
+    if re.fullmatch(r"cd \S+ \|\| (exit|return)( \S+)?", k):   # sh.cd-exit reports this one
+        return True
+    if re.search(r"\bumount\s+\"?\$\{?\w*_dir\b", raw):   # unmounting the runtime the script mounted itself
+        return True
+    if re.match(r"(\$ESUDO )?(env )?P (headless|cleanup)\b", k):   # the Westonpack call; templates.pick() already chose the mode's template
+        return True
+    if re.fullmatch(r"for \w+ in [^;]*; do", k) and "$(" not in k and not SYSTEM.search(raw or k):
+        return True   # a loop over the port's own files or variables
+    if re.fullmatch(r"(elif|if) (\[\[?|!) .*; then", k) and "$(" not in k and not SYSTEM.search(raw or k):
+        return True   # a test of the port's own files and variables; the commands inside are checked on their own lines
+    return False
 
 
 SYSTEM = re.compile(r"""(?x)
@@ -65,19 +85,19 @@ SYSTEM = re.compile(r"""(?x)
  | \b(export|unset)\b[^#]*\b(LIBGL_|SDL_(VIDEO|AUDIO|RENDER|HINT)|LD_PRELOAD|ALSA_|PULSE_|MESA_|GALLIUM_|PIPEWIRE_)\w*
  | ^\s*(LIBGL_|SDL_(VIDEO|AUDIO|RENDER)|ALSA_|PULSE_|MESA_|GALLIUM_)\w*=
  | \b(systemctl|modprobe|insmod|sysctl|swapon|swapoff|amixer|alsactl|nmcli|killall|pkill|setenforce)\b
- | \bmount\b(?!.*squashfs) | \bumount\b
+ | \bmount\b(?!.*squashfs) | \bumount\b(?!\s+\"?\$\{?\w*_dir\b)
  | \b(CFW_NAME|DEVICE_NAME|DEVICE_CPU)\b | os-release
 """)
 
 
 # Documented patterns that reach outside the port on purpose: PortMaster's bind helpers (target under $HOME),
 # the sdl3-sdl2-backend driver forwarding, and an LD_PRELOAD prefix on the launch line (OmniOSK).
-DOCUMENTED = re.compile(r"^\s*(bind_(directories|files)\b|(export\s+)?SDL3SHIM_\w+=|SDL_(VIDEO|AUDIO)DRIVER=\S*GAME_SDL_\w*DRIVER|LD_PRELOAD=\S+\s+\S)")
+DOCUMENTED = re.compile(r"^\s*(bind_(directories|files)\b|pm_(gptokeyb_finish|finish|platform_helper|message_close)\b|(export\s+)?SDL3SHIM_\w+=|SDL_(VIDEO|AUDIO)DRIVER=\S*GAME_SDL_\w*DRIVER|LD_PRELOAD=\S+\s+\S)")
 
 
 def counted(k, raw, common):
     """Does this line count as non-standard logic: rare, not template, not game-specific, and reaching outside the port?"""
-    return (k not in common and k not in TEMPLATE and not exempt(k) and not DOCUMENTED.match(raw)
+    return (k not in common and k not in TEMPLATE and not exempt(k, raw) and not DOCUMENTED.match(raw)
             and bool(SYSTEM.search(raw)))
 
 

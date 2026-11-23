@@ -200,6 +200,23 @@ class Planted(unittest.TestCase):
             make_port(t, sh=GOOD_SH.replace("cd \"$GAMEDIR\"\n", 'cd "$GAMEDIR"\nif [ ! -f x ]; then\n  echo "Missing game files."\n  exit 1\nfi\n'))
             self.assertIn("sh.echo-message", rules_of(t))
 
+    def test_printf_continuation_is_not_log_split(self):
+        cfg = 'cd "$GAMEDIR"\nprintf \'[autoload]\\n\\nA="*%s"\\n\' \\\n  "$GAMEDIR/shim/a.gd" > "$GAMEDIR/override.cfg"\n'
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace('cd "$GAMEDIR"\n', cfg, 1))
+            self.assertNotIn("sh.log-split", rules_of(t))
+
+    def test_ordinary_launcher_lines_are_not_template_diff(self):
+        extra = ('cd "$GAMEDIR"\nBINARY=dhewm3\nGAME=""\n$ESUDO chmod +x "$GAMEDIR/launcher" "$GAMEDIR/$BINARY"\n'
+                 'if [[ -z "$GAME" ]]; then\n  GAME=$(./launcher "$GAMEDIR")\n  pm_gptokeyb_finish\nfi\n'
+                 'while true; do\n  ./$BINARY\n  pm_gptokeyb_finish\n  [ -f "$GAMEDIR/again" ] || break\n  continue\ndone\n'
+                 'godot_dir=/tmp/godot\n$ESUDO mkdir -p "$godot_dir" "$GAMEDIR/conf"\n[[ "$PM_CAN_MOUNT" != "N" ]] && $ESUDO umount "$godot_dir"\n'
+                 'for r in "$a" "$b"; do\n  echo "$r"\ndone\n')
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, sh=GOOD_SH.replace('cd "$GAMEDIR"\n', extra, 1))
+            self.assertNotIn("sh.template-diff", rules_of(t))
+            self.assertNotIn("sh.nonstandard", rules_of(t))
+
     def test_empty_licenses(self):
         with tempfile.TemporaryDirectory() as t:
             make_port(t)
