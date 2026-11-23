@@ -108,14 +108,40 @@ def allowed(keys):
     return out
 
 
+def _runtime_helpers(text):
+    """Line numbers of a function that fetches (runtime_check) and mounts a runtime squashfs, and of its calls.
+    One helper called per runtime is the template's mount block written once instead of twice."""
+    lines = text.splitlines()
+    skip = set()
+    i = 0
+    while i < len(lines):
+        m = re.match(r"\s*(?:function\s+)?(\w+)\s*\(\)\s*\{?\s*$", lines[i])
+        if not m:
+            i += 1
+            continue
+        j = next((k for k in range(i + 1, len(lines)) if re.match(r"\}\s*$", lines[k])), None)
+        if j is None:
+            break
+        body = "\n".join(lines[i:j + 1])
+        if "runtime_check" in body and re.search(r"\bmount\b[^\n]*squashfs", body):
+            skip.update(range(i + 1, j + 2))
+            call = re.compile(r"\s*" + re.escape(m.group(1)) + r"\s")
+            skip.update(n for n, l in enumerate(lines, 1) if call.match(l))
+        i = j + 1
+    return skip
+
+
 def extra_lines(text, keys, peer_keys=(), common=frozenset()):
     """[(line, raw)] of logic lines that neither the templates, the documented patterns, the standard lines of merged
     ports nor the closest merged port has. Game-specific lines (assignments, the launch line, block ends) and
     system-reaching lines (sh.nonstandard lists those) are left out."""
     ok = allowed(keys)
     peer = set(peer_keys)
+    skip = _runtime_helpers(text)
     out = []
     for n, k, raw in scriptnorm.lines(text):
+        if n in skip:
+            continue
         if k in ok or k in common or k in scriptnorm.TEMPLATE or scriptnorm.exempt(k, raw) or scriptnorm.DOCUMENTED.match(raw):
             continue
         if scriptnorm.SYSTEM.search(raw) or hashlib.sha1(k.encode()).hexdigest()[:8] in peer:

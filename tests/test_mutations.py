@@ -267,6 +267,11 @@ MUTATIONS = [
     # found in fearandhunger / felvidek (quixjs) and pokemonfulldex
     ("HOTKEY set by the script", insert('export HOTKEY="${HOTKEY:-guide}"\n'), "sh.hotkey-override", "WARN"),
     ("port downloads its own updates", insert('update="$(python3 update.py "$controlfolder/autoinstall")"\n'), "sh.self-update", "WARN"),
+    # found on muOS: a port made ~/.local/share/PortMaster, every other port then failed with "control.txt: No such file"
+    ("mkdir in the XDG PortMaster folder", insert('$ESUDO mkdir -p "$XDG_DATA_HOME/PortMaster/libs"\n'), "sh.controlfolder-write", "ERROR"),
+    ("hardcoded home PortMaster folder", insert("mkdir -p ~/.local/share/PortMaster\n"), "sh.controlfolder-write", "ERROR"),
+    ("copy into controlfolder", insert('cp "$GAMEDIR/rt.squashfs" "$controlfolder/libs/"\n'), "sh.controlfolder-write", "ERROR"),
+    ("redirect into controlfolder", insert('echo x > "${controlfolder}/note.txt"\n'), "sh.controlfolder-write", "ERROR"),
     ("many lines no example or merged port has", insert("".join(f'if [ -f "$GAMEDIR/flag{i}" ]; then touch "$GAMEDIR/done{i}"; fi\n' for i in range(8))),
      "sh.template-diff", "INFO"),
 ]
@@ -292,6 +297,7 @@ VALID = [
     ("bind_files source touched", insert('mkdir -p "$GAMEDIR/conf"\ntouch "$GAMEDIR/conf/.rc"\nbind_files ~/.rc "$GAMEDIR/conf/.rc"\n')),
     ("XDG prefix on one command", insert('XDG_DATA_HOME="$GAMEDIR/conf" ./testgame.aarch64 --version\n')),
     ("XDG set to the default", insert('export XDG_DATA_HOME="$HOME/.local/share"\n')),
+    ("reads from controlfolder", insert('cp "$controlfolder/gptokeyb" "$GAMEDIR/"\n$ESUDO mkdir -p "$GAMEDIR/conf"\nmount "$controlfolder/libs/x.squashfs" /tmp/x\n')),
     ("progress echo", insert('echo "Starting the game"\n')),
     ("echo writing state", insert('if [ ! -f x ]; then\n  echo "1" > "$GAMEDIR/state"\n  exit 1\nfi\n')),
     ("echo then pm_show_error", insert('if [ ! -f x ]; then\n  echo "x missing"\n  pm_show_error "x is missing" --title "Missing"\n  exit 1\nfi\n')),

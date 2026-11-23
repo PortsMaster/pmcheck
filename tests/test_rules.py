@@ -217,6 +217,15 @@ class Planted(unittest.TestCase):
             self.assertNotIn("sh.template-diff", rules_of(t))
             self.assertNotIn("sh.nonstandard", rules_of(t))
 
+    def test_runtime_mount_helper_is_the_template_block(self):
+        from pmcheck import templates
+        helper = ('mount_runtime() {\n  if [ ! -f "$controlfolder/libs/$1.squashfs" ]; then\n'
+                  '    $ESUDO "$controlfolder/harbourmaster" --quiet --no-check runtime_check "$1.squashfs"\n  fi\n'
+                  '  $ESUDO mkdir -p "$2"\n  $ESUDO mount "$controlfolder/libs/$1.squashfs" "$2"\n}\n'
+                  'mount_runtime "$a" "$b" || exit 1\nmount_runtime "$c" "$d" || exit 1\nweird_thing --odd\n')
+        extra = [raw for _, raw in templates.extra_lines(helper, ["site/standard-basic"])]
+        self.assertEqual(extra, ["weird_thing --odd"])
+
     def test_empty_licenses(self):
         with tempfile.TemporaryDirectory() as t:
             make_port(t)

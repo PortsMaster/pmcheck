@@ -1381,6 +1381,37 @@ def _listing(blocks, limit=12, width=70):
     return "\n".join(rows)
 
 
+# PortMaster's own folder: control.txt, funcs.txt, libs/, harbourmaster. The header of every launch script picks the first of
+# /opt/system/Tools/PortMaster, /opt/tools/PortMaster, $XDG_DATA_HOME/PortMaster, /roms/ports/PortMaster that exists as a folder.
+_PM_DIR = (r"(\$\{?controlfolder\}?|\$\{?XDG_DATA_HOME\}?/PortMaster|(\$\{?HOME\}?|~|/root|/home/\w+)/\.local/share/PortMaster"
+           r"|/roms/ports/PortMaster|/opt/(system/Tools|tools)/PortMaster|/mnt/\w+/MUOS/PortMaster)\b")
+_PM_WRITERS = re.compile(r"(?:^|[;&|(]\s*|\bsudo\s+|\$ESUDO\s+|\bthen\s+|\bdo\s+)(mkdir|touch|ln|install|tee|rsync|rm)\b([^;&|]*)")
+_PM_COPIERS = re.compile(r"(?:^|[;&|(]\s*|\bsudo\s+|\$ESUDO\s+|\bthen\s+|\bdo\s+)(cp|mv)\b([^;&|]*)")
+
+
+def controlfolder_writes(code):
+    """[(line number, line)] that create, write or delete anything in PortMaster's own folder.
+    A folder made at $XDG_DATA_HOME/PortMaster by a port makes every other port's header pick that empty folder
+    ("control.txt: No such file", then GAMEDIR=//ports/<name> on the rootfs)."""
+    out = []
+    for n, l in code:
+        hit = False
+        for m in _PM_WRITERS.finditer(l):
+            if re.search(_PM_DIR, m.group(2)):
+                hit = True
+        for m in _PM_COPIERS.finditer(l):
+            args = [a for a in m.group(2).split() if not a.startswith("-")]
+            if args and re.search(_PM_DIR, args[-1]):   # the destination is the last argument; reading from it is fine
+                hit = True
+        if re.search(r"(?<![&\d])\d?>>?\s*\"?" + _PM_DIR, l):
+            hit = True
+        if re.search(r"\b(unzip\s[^;&|]*-d|tar\s[^;&|]*-C)\s*\"?" + _PM_DIR, l):
+            hit = True
+        if hit:
+            out.append((n, l.strip()))
+    return out
+
+
 def _script(port, s):
     f = port.rel(s)
     raw = Path(s).read_bytes()
@@ -1478,6 +1509,13 @@ def _script(port, s):
                           fix="Drop it unless a device needs it, and say which in a short comment.")
             continue
         yield Finding("sh.sdl-driver", sev, "Never force SDL_VIDEODRIVER/SDL_AUDIODRIVER; the CFW selects the backend.", file=f, line=n)
+    cf = controlfolder_writes(code)
+    if cf:
+        yield Finding("sh.controlfolder-write", ERROR, "The script creates or writes inside PortMaster's own folder. A folder made at $XDG_DATA_HOME/PortMaster "
+                      "(e.g. ~/.local/share/PortMaster) makes the header of every other port pick that empty folder, and every port then fails with "
+                      "`control.txt: No such file` and writes into //ports on the rootfs.", file=f, line=cf[0][0],
+                      snippet=_listing([[n, n, l] for n, l in cf], 8),
+                      fix="Write only below $GAMEDIR. PortMaster and harbourmaster manage their own folder; use `harbourmaster runtime_check` to fetch a runtime.")
     for n, l in grep(r"^\s*export\s+LD_PRELOAD="):
         yield Finding("sh.ld_preload", ERROR, "export LD_PRELOAD leaks into gptokeyb; set it as a prefix on the game command only.", file=f, line=n)
     # How much of the script is neither template nor game-specific: unusual logic reviewers will ask about
