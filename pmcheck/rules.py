@@ -510,7 +510,10 @@ def readme(port):
         yield Finding("readme.thanks", WARN, "README has no thank-you to the game's creator (usually a '## Notes' section at the top).", file=port.rel(p),
                       fix="## Notes\n\nThanks to <creator> for creating <game>!")
     need = ["controls"]
-    if any(not data.PREBUILT_RE.match(p.name) and p.parent == port.gamedir for p, _ in elves(port)):
+    # an executable the porter built, in the game folder or in a tools/ folder; libraries and the runtimes' own loaders don't count
+    if any(not data.PREBUILT_RE.match(p.name) and ".so" not in p.name and not re.search(r"(^|/)(jre|jdk)[^/]*/", port.rel(p))
+           and (p.parent == port.gamedir or info["type"] == "EXEC" or (info["type"] == "DYN" and not info["soname"]))
+           for p, info in elves(port)):
         need.append("compile")
     shipped = {f.name for f in port.files()}
     # patches only: other archive names in a README are usually game files the player brings, or the port zip
@@ -578,6 +581,17 @@ def patcher_questions(port):
                           file=port.rel(q), fix="Only build and return the questions table; don't change the patcher's UI or touch files from it.")
 
 
+def _is_xna_effect(f):
+    """A compiled XNA/MonoGame effect (shader) .xnb: a program someone wrote, not the game's sprites, fonts or audio."""
+    if f.suffix.lower() != ".xnb":
+        return False
+    try:
+        head = f.read_bytes()[:600]
+    except OSError:
+        return False
+    return head[:3] == b"XNB" and b"Microsoft.Xna.Framework.Content.EffectReader" in head
+
+
 @check
 def game_content(port):
     """Files in a game's own content format (XNA: .xnb sprites/fonts, .xwb/.xsb audio banks) shipped with the port are
@@ -585,7 +599,7 @@ def game_content(port):
     if port.gamedir is None:
         return
     hits = [f for f in port.files() if f.suffix.lower() in data.GAME_CONTENT_EXT
-            and "gamedata" not in (x.lower() for x in port.rel(f).split("/")[1:-1])]
+            and "gamedata" not in (x.lower() for x in port.rel(f).split("/")[1:-1]) and not _is_xna_effect(f)]
     if hits:
         names = ", ".join(port.rel(f) for f in hits[:4]) + (", ..." if len(hits) > 4 else "")
         yield Finding("files.game-content", INFO, f"Ships files in the game's own content format ({names}). If they are made from the game's files "

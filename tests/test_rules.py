@@ -255,6 +255,25 @@ class Relaxed(unittest.TestCase):
             self.assertIn("readme.section", rules_of(t))
 
 
+    def test_tool_binary_in_tools_folder_needs_compile(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            gd = Path(t) / "testgame"
+            (gd / "tools").mkdir()
+            (gd / "testgame.aarch64").rename(gd / "tools" / "mytool")
+            (gd / "README.md").write_text(README.split("## Compile")[0])
+            self.assertIn("readme.section", rules_of(t))
+
+    def test_xna_effect_is_not_game_content(self):
+        effect = b"XNBw\x05\x00" + b"\x01" + b"yMicrosoft.Xna.Framework.Content.EffectReader, MonoGame.Framework" + b"MGFX\x00" * 4
+        texture = b"XNBw\x05\x00" + b"\x01" + b"\x2eMicrosoft.Xna.Framework.Content.Texture2DReader" + b"\x00" * 40
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            (Path(t) / "testgame" / "Mask.xnb").write_bytes(effect)
+            self.assertNotIn("files.game-content", rules_of(t))
+            (Path(t) / "testgame" / "Sprite.xnb").write_bytes(texture)
+            self.assertIn("files.game-content", rules_of(t))
+
     def test_readme_rename_hint(self):
         with tempfile.TemporaryDirectory() as t:
             make_port(t)
