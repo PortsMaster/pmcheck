@@ -226,6 +226,19 @@ class Planted(unittest.TestCase):
         extra = [raw for _, raw in templates.extra_lines(helper, ["site/standard-basic"])]
         self.assertEqual(extra, ["weird_thing --odd"])
 
+    def test_identical_libs_are_not_also_duplicates(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            gd = Path(t) / "testgame"
+            (gd / "libs.aarch64").mkdir()
+            lib = FIX / "libfoo.so.1"
+            if not lib.exists():
+                self.skipTest("fixture libfoo.so.1 missing")
+            for n in ("libfoo.so", "libfoo.so.1", "libfoo.so.1.2.3"):
+                shutil.copy(lib, gd / "libs.aarch64" / n)
+            found = [f for f in run_all(load(t)) if f.rule in ("libs.identical", "libs.duplicate")]
+            self.assertEqual([f.rule for f in found].count("libs.duplicate"), 0)
+
     def test_empty_licenses(self):
         with tempfile.TemporaryDirectory() as t:
             make_port(t)

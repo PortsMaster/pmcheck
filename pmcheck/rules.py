@@ -724,6 +724,8 @@ def binaries(port):
             by_hash.setdefault((p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest()), []).append(p)
         except OSError:
             pass
+    in_identical = set()
+    identical_groups = []
     for group in by_hash.values():
         stems = {}
         for g in group:
@@ -734,10 +736,18 @@ def binaries(port):
         so = elf_info(group[0])["soname"]
         if so and any(g.name == so for g in group) and len(group) == 2:
             continue   # one file is named after the SONAME: libs.duplicate decides
+        in_identical.update(group)
         names = ", ".join(port.rel(g) for g in group)
         keep = f"keep {so}, plus any other name the game opens itself" if so else "keep one"
-        yield Finding("libs.identical", WARN, f"Identical copies of one library: {names}; {keep}.", file=port.rel(group[0]),
-                      fix="Delete the extra copies.")
+        identical_groups.append((names, keep, port.rel(group[0])))
+    if len(identical_groups) == 1:
+        names, keep, first = identical_groups[0]
+        yield Finding("libs.identical", WARN, f"Identical copies of one library: {names}; {keep}.", file=first, fix="Delete the extra copies.")
+    elif identical_groups:
+        names, keep, first = identical_groups[0]
+        yield Finding("libs.identical", WARN, f"{len(identical_groups)} libraries are shipped as several identical copies, e.g. {names}; {keep}. "
+                      f"Also: {', '.join(g[0].split(',')[0].rsplit('/', 1)[-1] for g in identical_groups[1:7])}{', ...' if len(identical_groups) > 7 else ''}.",
+                      file=first, fix="Delete the extra copies of each: keep the file named after the SONAME plus any other name the game opens itself.")
     x11_done = False
     common = {}
     for p in sorted(libfiles, key=lambda x: port.rel(x)):
@@ -772,6 +782,8 @@ def binaries(port):
                 common.setdefault(name, []).append(p)
         so = elf_info(p)["soname"]
         if so and p.name != so and p.name not in scripts_all and not _named_elsewhere(port, p):
+            if p in in_identical:
+                continue   # libs.identical already names the whole group
             if (p.parent / so).exists():
                 if re.search(r"\bmono\b|dotnet", scripts_all, re.I):
                     continue   # .NET P/Invoke opens the unversioned name, native libs NEED the SONAME: both copies are used
@@ -931,10 +943,20 @@ def licences(port):
                 if len(core) >= 3:
                     tokens.add(core)
     main_bins = {f"{port.gamedir.name}.aarch64", port.gamedir.name}
+    # the engine's own modules: unversioned libX.so files that link each other in one folder and that a program of the port links
+    # (libgame.so, libsheet.so ...). Third-party libraries carry a SONAME version or stand alone.
+    unversioned = {p: i for p, i in elves(port) if re.fullmatch(r"lib[\w+-]+\.so", p.name) and i["soname"] in ("", None, p.name)}
+    exe_needs = {n for p, i in elves(port) if ".so" not in p.name for n in i["needed"]}
+    own_modules = set()
+    for p, i in unversioned.items():
+        sibs = {q.name for q in unversioned if q.parent == p.parent and q != p}
+        linked_together = bool(sibs & set(i["needed"])) or any(p.name in j["needed"] for q, j in unversioned.items() if q.parent == p.parent and q != p)
+        if linked_together and any(q.name in exe_needs for q in unversioned if q.parent == p.parent):
+            own_modules.add(p)
     LIB_DIR = re.compile(r"(^|/)(libs?(\.[\w]+)?|gl4es[^/]*|lib/arm64-v8a)/")
     TOOLS = re.compile(r"^(astcenc|oggenc|oggdec|ffmpeg|ffprobe|7z\w*|xdelta3?|innoextract|box64|box86|unrar|bsdtar|lz4|zstd)(\.\w+)?$")
     for p, info in elves(port):
-        if p.name in main_bins:
+        if p.name in main_bins or p in own_modules:
             continue
         rel = port.rel(p)
         # a component that brings its own licence tree (a JRE's legal/, a runtime's LICENSE)
