@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-19",
+ "updated": "2026-11-27",
  "keys": {
   "ags_3.6.squashfs": [
    "aarch64",
@@ -8,7 +8,13 @@
   "dotnet-3.1.32.squashfs": [
    "aarch64"
   ],
+  "dotnet-6.0.36.squashfs": [
+   "aarch64"
+  ],
   "dotnet-8.0.12.squashfs": [
+   "aarch64"
+  ],
+  "dotnet-9.0.22.squashfs": [
    "aarch64"
   ],
   "frt_2.1.6.squashfs": [
@@ -198,7 +204,9 @@
   "ags_3.6.squashfs": "ags_3.6.squashfs",
   "ags_3.6.x86_64.squashfs": "ags_3.6.squashfs",
   "dotnet-3.1.32.squashfs": "dotnet-3.1.32.squashfs",
+  "dotnet-6.0.36.squashfs": "dotnet-6.0.36.squashfs",
   "dotnet-8.0.12.squashfs": "dotnet-8.0.12.squashfs",
+  "dotnet-9.0.22.squashfs": "dotnet-9.0.22.squashfs",
   "frt_2.1.6.armhf.squashfs": "frt_2.1.6.squashfs",
   "frt_2.1.6.squashfs": "frt_2.1.6.squashfs",
   "frt_3.0.6_v1.squashfs": "frt_3.0.6_v1.squashfs",

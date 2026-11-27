@@ -1,6 +1,10 @@
 """Static lists the rules check against. Edit here, not in the rules."""
 import json
+import os
 import re
+import tempfile
+import time
+import urllib.request
 from pathlib import Path
 
 # harbourmaster config.py HM_GENRES
@@ -185,3 +189,23 @@ REINVENT_RULES = {
 # bin.debug: strip only pays off for real savings
 STRIP_MIN = 5 * 1048576     # below this, no finding
 STRIP_WARN = 20 * 1048576   # from here a warning, between the two a note
+
+
+RUNTIME_CATALOG_URL = "https://github.com/PortsMaster/PortMaster-New/releases/latest/download/ports.json"
+
+
+def runtime_in_live_catalog(squashfs):
+    """Is this runtime in the catalog harbourmaster reads right now? The bundled runtimes.json is a snapshot and a runtime
+    published after it was taken is not in it. True/False, or None when the catalog cannot be fetched (offline, PMCHECK_OFFLINE=1).
+    The runtime names are cached for six hours in the temp folder."""
+    if os.environ.get("PMCHECK_OFFLINE"):
+        return None
+    cache = Path(tempfile.gettempdir()) / "pmcheck-runtime-catalog.json"
+    try:
+        if not cache.exists() or time.time() - cache.stat().st_mtime > 6 * 3600:
+            raw = urllib.request.urlopen(RUNTIME_CATALOG_URL, timeout=15).read()
+            names = sorted(k for k, a in json.loads(raw)["utils"].items() if k.endswith(".squashfs") and (a.get("runtime_name") or k) == k)
+            cache.write_text(json.dumps(names))
+        return squashfs in json.loads(cache.read_text())
+    except (OSError, ValueError, KeyError):
+        return None

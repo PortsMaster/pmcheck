@@ -325,6 +325,8 @@ def port_json(port):
             elif sq in cat["files"]:
                 yield Finding("port.json.runtime", ERROR, f"runtime {r!r} is the file name of one arch build; use the catalog key.", file=f,
                               fix=f'"runtime": ["{cat["files"][sq]}"]')
+            elif data.runtime_in_live_catalog(sq):
+                pass   # published after the bundled snapshot was taken
             else:
                 yield Finding("port.json.runtime", ERROR, f"runtime {r!r} is not in PortMaster's runtime catalog (checked {cat['updated']}); "
                               "harbourmaster refuses it as an unknown runtime, so the port can't download it.", file=f,

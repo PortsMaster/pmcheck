@@ -483,6 +483,17 @@ class BadPorts(unittest.TestCase):
     def test_runtime_label(self):
         self.check("port.json.runtime", attr={"runtime": ["Westonpack 0.2"]})
 
+    def test_runtime_published_after_the_snapshot(self):
+        from unittest import mock
+        from pmcheck import data
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t, attr={"runtime": ["dotnet-99.0.1.squashfs"]})
+            self.assertIn("port.json.runtime", rules_of(t))   # unknown offline: still an error
+            with mock.patch.object(data, "runtime_in_live_catalog", return_value=True):
+                self.assertNotIn("port.json.runtime", rules_of(t))
+            with mock.patch.object(data, "runtime_in_live_catalog", return_value=False):
+                self.assertIn("port.json.runtime", rules_of(t))
+
     def test_screenshot_size(self):
         self.check("images.screenshot-size", shot=(320, 240))
 
