@@ -1532,6 +1532,48 @@ def script_hygiene(port):
                 yield Finding("patcher.controlfolder", INFO, f"The patchscript looks for PortMaster again (line {det[0][0]}). The launch script has already sourced control.txt, "
                               "which exports `controlfolder` and `DEVICE_ARCH`, so the patchscript can use them as they are.", file=f, line=det[0][0],
                               fix='Delete the detection block and use `"$controlfolder/xdelta3"`.')
+            L = [(n, l.strip()) for n, l in code]
+            fn_of, cur = {}, None
+            for n, raw in enumerate(body.splitlines(), 1):
+                m = re.match(r"\s*(?:function\s+)?(\w+)\s*\(\)\s*\{?", raw)
+                if m:
+                    cur = m.group(1)
+                if cur:
+                    fn_of[n] = cur
+                if cur and re.match(r"\}", raw):
+                    cur = None
+            xd = [i for i, (_, l) in enumerate(L) if re.search(r"(?:^|[;&|(]\s*|\$ESUDO\s+|\bif\s+!?\s*)\"?(?:[^\s\"=]*/)?xdelta3?\"?\s+(?:-\S+\s+)*-\w*d\b", l)]
+            if xd:
+                setE = re.search(r"^\s*set\s+-\w*e", body, re.M)
+                def _checked(i):
+                    l = L[i][1]
+                    if l.rstrip().endswith("&"):   # started in the background and waited for
+                        return True
+                    nxt = " ".join(x for _, x in L[i + 1:i + 3])
+                    prev = L[i - 1][1] if i else ""
+                    if setE or re.search(r"\|\||&&|\bif\b|\$\?", l) or re.search(r"\$\?|^\s*if\b", nxt) or re.match(r"if\b", prev):
+                        return True
+                    fn = fn_of.get(L[i][0])   # the function ends with the call: its callers decide
+                    if fn and i + 1 < len(L) and L[i + 1][1].startswith("}"):
+                        return any(re.search(rf"(?:\|\||&&|\bif\s+!?\s*){fn}\b|\b{fn}\b[^\n]*(?:\|\||&&)", x) or (re.match(rf"{fn}\b", x) and re.match(r"(?:if\b|\$\?)", y))
+                                   for (_, x), (_, y) in zip(L, L[1:] + [(0, "")]))
+                    return False
+                bad = [i for i in xd if not _checked(i)]
+                if bad:
+                    rm = any(re.match(r"(?:\$ESUDO\s+)?rm\s", x) for _, x in L[bad[0] + 1:])
+                    yield Finding("patcher.xdelta-unchecked", WARN, f"The result of xdelta3 is not checked (`{L[bad[0]][1][:70]}`, line {L[bad[0]][0]}). "
+                                  "When the patch does not fit the player's files, the script goes on" + (" and deletes files afterwards, so the original can be gone for nothing" if rm else "")
+                                  + " and the Patcher shows a success screen. 19 of the 83 merged patchscripts that run xdelta3 do this; the rest check it.",
+                                  file=f, line=L[bad[0]][0],
+                                  fix='"$controlfolder/xdelta3" -d -s "$IN" -f "$PATCH" "$OUT" || { echo "PATCH_FAIL_MSG:The patch does not fit these game files."; echo "Patching process failed!"; exit 1; }')
+            if xd and not any(re.search(r"\[\[?\s+!?\s*-[fedrs]\s|\btest\s+-[fed]\s", l) for _, l in L):
+                yield Finding("patcher.no-input-check", INFO, "The patchscript runs xdelta3 but never checks that the game file it patches exists (2 of the 83 merged ones). "
+                              "A missing file turns into a tool error that the Patcher reports as success.", file=f,
+                              fix='[ -f "$DATADIR/data.win" ] || { echo "PATCH_FAIL_MSG:data.win is missing."; echo "Patching process failed!"; exit 1; }')
+            hp = next(((n, l) for n, l in L if re.search(r"(?:^|[\s\"'=])/(?:roms|storage|mnt)\b", l) and not re.match(r"(?:export\s+)?controlfolder=", l)), None)
+            if hp:
+                yield Finding("patcher.hardcoded-path", INFO, f"The patchscript names a device path (`{hp[1][:70]}`, line {hp[0]}). The ports folder is `/roms`, `/storage` or `/mnt/...` depending on the CFW, "
+                              "so the path is wrong on the others. 1 of 135 merged patchscripts does this.", file=f, line=hp[0], fix='Use `$GAMEDIR`, `$directory` or `$controlfolder`.')
             top = data.PORT_FILES["patchscript"]["max"]
             if len(code) > top:
                 yield Finding("patcher.length", INFO, f"The patchscript has {len(code)} lines of code. Merged patchscripts have a median of {data.PORT_FILES['patchscript']['p50']} and at most {top}.",
@@ -1553,6 +1595,22 @@ def bundled_tools(port):
                           fix='Drop the copy and call `"$controlfolder/7zzs.$DEVICE_ARCH"`.')
 
 
+
+
+@check
+def helper_copy(port):
+    """gmKtool.py / GMblob.py that differ from every version merged ports share: the patch step runs a changed copy of the shared tool."""
+    if port.gamedir is None:
+        return
+    shared = data.PORT_FILES["shared"]
+    for p in port.logical_files():
+        if p.name not in ("gmKtool.py", "GMblob.py"):
+            continue
+        if hashlib.sha1(p.read_bytes().decode("utf8", "replace").encode()).hexdigest() in shared:
+            continue
+        yield Finding("files.helper-changed", INFO, f"{port.rel(p)} differs from every version of {p.name} that merged ports share "
+                      f"({sum(1 for v in shared.values() if v == p.name)} versions). The patch step runs this changed copy as root on the player's game files.",
+                      file=port.rel(p), fix=f"Use one of the shared versions of {p.name} unchanged. If the port needs a change, say in the README what it changes and why.")
 
 @check
 def loader_build(port):

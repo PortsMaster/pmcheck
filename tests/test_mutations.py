@@ -185,6 +185,13 @@ MUTATIONS = [
     ("patchscript longer than any merged one", both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
                                                    write("testgame/tools/patchscript", "#!/bin/bash\n" + "echo x\n" * 300)), "patcher.length", "INFO"),
     ("own xdelta3 in tools/", write("testgame/tools/xdelta3", "x"), "files.bundled-tool", "INFO"),
+    ('xdelta3 result not checked, original removed', both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
+                      write("testgame/tools/patchscript", '#!/bin/bash\n[ -f "$GAMEDIR/data.win" ] || exit 1\n"$controlfolder/xdelta3" -d -s "$GAMEDIR/data.win" -f p.xdelta "$GAMEDIR/game.droid"\nrm -f "$GAMEDIR/data.win"\n')), 'patcher.xdelta-unchecked', 'WARN'),
+    ('patchscript never checks its input', both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
+                      write("testgame/tools/patchscript", '#!/bin/bash\n"$controlfolder/xdelta3" -d -s a -f p b || { echo "Patching process failed!"; exit 1; }\n')), 'patcher.no-input-check', 'INFO'),
+    ('patchscript with a device path', both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
+                      write("testgame/tools/patchscript", '#!/bin/bash\n[ -f /roms/ports/testgame/data.win ] || exit 1\n"$controlfolder/xdelta3" -d -s a -f p b || { echo "Patching process failed!"; exit 1; }\n')), 'patcher.hardcoded-path', 'INFO'),
+    ('changed copy of gmKtool.py', write("testgame/tools/gmKtool.py", "print('my own version')\n"), 'files.helper-changed', 'INFO'),
     ("PortMaster header with its own muOS branch", lambda r: sh(r, lambda s: s.replace('else\n  controlfolder="/roms/ports/PortMaster"', 'elif [ -f "/mnt/mmc/MUOS/PortMaster/control.txt" ]; then\n  controlfolder="/mnt/mmc/MUOS/PortMaster"\nelse\n  controlfolder="/roms/ports/PortMaster"', 1)), "sh.header-modified", "WARN"),
     ("get_controls result kept", lambda r: sh(r, lambda s: s.replace("get_controls\n", "get_controls\ncontrols_status=$?\n", 1)), "sh.controls-status", "WARN"),
     ("umask in the launch script", insert("umask 077\n"), "sh.umask", "WARN"),
@@ -302,6 +309,10 @@ MUTATIONS = [
 
 # (name, change): valid ways of writing a port; must add no ERROR or WARN
 VALID = [
+    ('patchscript with checked xdelta3 and input check', both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
+                      write("testgame/tools/patchscript", '#!/bin/bash\n[ -f "$GAMEDIR/data.win" ] || { echo "Patching process failed!"; exit 1; }\n"$controlfolder/xdelta3" -d -s a -f p b || { echo "Patching process failed!"; exit 1; }\nrm -f a\n'))),
+    ('patchscript with if ! xdelta3', both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
+                      write("testgame/tools/patchscript", '#!/bin/bash\n[ -f a ] || exit 1\nif ! "$controlfolder/xdelta3" -d -s a -f p b; then\n  echo "Patching process failed!"; exit 1\nfi\nrm -f a\n'))),
     ("header with a comment and export controlfolder", lambda r: sh(r, lambda s: s.replace('if [ -d "/opt/system', '# PortMaster preamble\nif [ -d "/opt/system', 1).replace("source $controlfolder/control.txt", "export controlfolder\nsource $controlfolder/control.txt", 1))),
     ("notice linking to shipped files, a URL and an anchor", write("testgame/licenses/NOTICES.md", "See [text](LICENSE.testgame), [site](https://example.org/x.zip), [top](#top) and [readme](../README.md).\n")),
     ("upstream README copied into licenses/", write("testgame/licenses/UPSTREAM.md", "See [guide](docs/COMPILING.md).\n")),
