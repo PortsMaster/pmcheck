@@ -117,6 +117,12 @@ PM_ENV_PREFIX = ("SDL_", "LIBGL_", "XDG_", "MESA_", "MONO_", "DOTNET_", "PULSE_"
 # Normalized launch-script lines found in >= min_scripts merged PortMaster-New scripts (tools/build_script_lines.py)
 SCRIPT_LINES = json.loads((Path(__file__).parent / "script_lines.json").read_text())
 
+# What merged ports ship besides the launch script: shared helper hashes, own-code size, patchscript size (tools/build_port_files.py)
+PORT_FILES = json.loads((Path(__file__).parent / "port_files.json").read_text())
+
+# Builds of the shared runtime loaders (gmloadernext.aarch64 ...) merged ports ship, by git blob id (tools/build_known_binaries.py)
+KNOWN_BINARIES = json.loads((Path(__file__).parent / "known_binaries.json").read_text())["binaries"]
+
 # a game's own content formats; a port shipping them is usually redistributing edited game data
 GAME_CONTENT_EXT = {".xnb", ".xwb", ".xsb", ".xgs"}
 

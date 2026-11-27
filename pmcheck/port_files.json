@@ -1,0 +1,42 @@
+{
+"generated": "2026-11-27",
+"scripts": 1428,
+"shared_min": 3,
+"shared": {
+"5fa3586809c1b1320b243e6c9ef0f7c0f72b0591": "GMblob.py",
+"5c5ecc48de1450cd0073adfa75136bc81353dc3a": "GMblob.py",
+"830b10fe36a8570da6d6b49791d785009b4cde0d": "GMblob.py",
+"d40be513593bf92ca7c36991868aad422952fa1e": "GMblob.py",
+"675ef5491b8c3c57c30e31039e7687c4ae9b1955": "SDL_swap_gpbuttons.py",
+"489f21b49fb99dc9bd2dcefc00e1c0311c050e2c": "gmKtool.py",
+"dc24a2372606b0ac8808de64c592c64489dfff70": "gmKtool.py",
+"c29be05f94e50dd9672ddc991a4cb8622a0e5e1b": "gmKtool.py",
+"02e6f8b839a7e9a4f9068be437e9b91634fa4031": "gmKtool.py",
+"42115fd1a8f58f584832e438e48731a36861acbf": "gmKtool.py",
+"a78156e06f254ef87a22b600fe04511f65a5db06": "gmKtool.py",
+"d6895e6845bcd34bb83647539406651db04781b0": "sugar_fingerprint.py",
+"0606e471419194de1b78293971349d048f08a516": "swapabxy.py"
+},
+"own_code": {
+"ports": 26,
+"p50": 80,
+"p90": 426,
+"max": 614,
+"largest": [
+"eatgirl",
+"flare",
+"minidoom2"
+]
+},
+"patchscript": {
+"count": 135,
+"p50": 96,
+"p90": 155,
+"max": 252
+},
+"indirect_launch": {
+"scripts": 1428,
+"flagged": 0,
+"ports": []
+}
+}

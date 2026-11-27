@@ -493,7 +493,7 @@ def images(port):
         if p.is_file() and re.match(r"^(screenshot|cover)(\..+)?\.(png|jpe?g)$", p.name, re.I):
             kb = p.stat().st_size
             if kb > data.IMAGE_MAX_BYTES:
-                yield Finding("images.size", WARN, f"{p.name} is {kb // 1024} KB (limit 100 KB).", file=port.rel(p),
+                yield Finding("images.size", WARN, f"{p.name} is {kb / 1024:.1f} KB (limit {data.IMAGE_MAX_BYTES // 1024} KB).", file=port.rel(p),
                               fix=f"Compress it with {data.PNG_COMPRESSOR}")
 
 
@@ -1276,6 +1276,8 @@ def script_lean(port):
         peer, _ = peers.closest(text, exclude=port.gamedir.name if port.gamedir is not None else None)
         keys = templates.pick(text, [x.name for x in port.files()])
         extra = templates.extra_lines(text, keys, peer["keys"] if peer else (), frozenset(data.SCRIPT_LINES["lines"]))
+        ind = peers.indirect_launch(text)   # reported by sh.launch-indirection
+        extra = [(n, raw) for n, raw in extra if not ind or n != ind[0]]
         ref = f"the closest merged port, {peer['name']}: {peers.url(peer)}" if peer else "merged ports of the same kind"
         length = (f"{n_code} lines of code, where merged {k.replace('+', ' + ')} ports have a median of {med or data.SCRIPT_MEDIAN}. ") if n_code > limit else ""
         if len(extra) >= data.TEMPLATE_DIFF_MIN:
@@ -1293,6 +1295,347 @@ def script_lean(port):
         elif length:
             yield Finding("sh.length", INFO, f"{length}It follows its template otherwise.", file=f, fix=f"Compare it with {ref} to see what can be shorter.")
 
+
+@check
+def launch_indirection(port):
+    """The script hands the game over to another script. Merged ports run helpers (patching, settings) before the
+    engine's own command; none starts the game through a script (tools/build_port_files.py)."""
+    for s in port.scripts:
+        hit = peers.indirect_launch(port.read_text(s))
+        if not hit:
+            continue
+        n, line = hit
+        total = data.PORT_FILES["indirect_launch"]["scripts"]
+        hidden = []
+        m = re.search(r"[^\s\"']+\.(?:py|sh)\b", line)
+        target = next((c for c in ((port.gamedir / m.group(0)), (port.root / m.group(0))) if m and c.is_file()), None) if port.gamedir is not None else None
+        if target is not None:
+            body = port.read_text(target)
+            for rx, what in ((r"GPTOKEYB", "starts gptokeyb (so the kill-switch name rules cannot be checked)"),
+                             (r"LD_PRELOAD", "sets `LD_PRELOAD` for the game"), (r"\bsubprocess\b|os\.system|os\.exec", "starts other processes")):
+                if re.search(rx, body):
+                    hidden.append(what)
+        extra = (f" `{port.rel(target)}` also {', '.join(hidden[:-1]) + (' and ' if len(hidden) > 1 else '') + hidden[-1]}: that happens where the script checks do not look." if hidden else "")
+        yield Finding("sh.launch-indirection", WARN, f"The script starts the game through another script (`{line[:80]}`) and then waits for it. "
+                      f"None of the {total} merged launch scripts does that: they run helpers for patching or settings first, then start the engine "
+                      "or the game binary from the script itself, so reviewers and testers can read what runs." + extra,
+                      file=port.rel(s), line=n,
+                      fix="Start the game binary or runtime from the launch script, as the template for this kind of port does, and move what the extra script "
+                          "adds into the game or into PortMaster's own helpers.")
+
+
+@check
+def extra_code(port):
+    """Python of the port's own, beyond the helpers merged ports share (gmKtool.py, GMblob.py ...): ports of an ordinary kind
+    ship at most data.PORT_FILES['own_code']['max'] lines of it."""
+    if port.gamedir is None or not port.scripts:
+        return
+    if peers.kind(peers.tags(port.read_text(port.scripts[0]))) in peers.ENGINE_SCRIPT_KINDS:
+        return
+    shared, own = data.PORT_FILES["shared"], []
+    for p in port.logical_files():
+        if p.suffix != ".py":
+            continue
+        text = p.read_bytes().decode("utf8", "replace")
+        if hashlib.sha1(text.encode()).hexdigest() in shared:
+            continue
+        own.append((len([l for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]), p))
+    total, ref = sum(n for n, _ in own), data.PORT_FILES["own_code"]
+    if total <= ref["max"]:
+        return
+    top = sorted(own, key=lambda x: -x[0])[:3]
+    yield Finding("files.extra-code", WARN, f"The package ships {total} lines of Python of its own in {len(own)} files "
+                  f"({', '.join(f'{port.rel(p)} {n}' for n, p in top)}). Merged ports of this kind ship at most {ref['max']} lines "
+                  f"outside the shared patcher helpers (gmKtool.py, GMblob.py ...), and only {ref['ports']} of {data.PORT_FILES['scripts']} ports ship any, "
+                  "mostly small game tools. Code like this has to be read line by line in review, and it runs on the handheld as root.",
+                  file=port.rel(top[0][1]),
+                  fix="Keep the launch in the script and PortMaster's helpers; put game features into the game itself. If a patch step needs a tool, "
+                      "use a shared Patcher helper or a short `tools/patchscript`.")
+
+
+# rm -r on "$VAR/*", "$VAR"/* or "$VAR/": with an empty VAR that is /* (the ports run as root)
+_RM_BELOW = re.compile(r"(?<![\w$])\"?\$\{?([A-Za-z_]\w*)(:\?[^}]*)?\}?\"?(?:/\*|/\"?\*|/)\"?(?=\s|$|;|&|\)|\|)")
+_RM_PM_VARS = {"controlfolder", "directory", "DEVICE_ARCH", "CFW_NAME", "PWD", "HOME"}
+
+
+def _var_safe(text, v, launch, depth=0):
+    """True when the script itself gives VAR a value that cannot be empty: PortMaster's own variables, GAMEDIR in a launch
+    script, $PWD, a literal absolute path, or a path below one of those."""
+    if v in _RM_PM_VARS or (v == "GAMEDIR" and launch):
+        return True
+    values = re.findall(r"^\s*(?:export\s+|local\s+|declare\s+(?:-\w+\s+)?)?" + re.escape(v) + r"=(.*?)\s*(?:#.*)?$", text, re.M)
+    if not values:
+        return False
+    for x in (x.strip().strip("\"'") for x in values):
+        m = re.match(r"^\$\{?(\w+)\}?/\S", x)
+        if m and depth < 4 and _var_safe(text, m.group(1), launch, depth + 1):
+            continue
+        if x in ("$PWD", "$(pwd)", "$(pwd -P)") or re.match(r"^\$\{?PWD\}?/\S", x):
+            continue
+        if re.match(r"^/[\w.\-]+(/[\w.\-]+)+$", x):
+            continue
+        return False
+    return True
+
+
+def rm_below_variable(text, launch):
+    """[(line, variable, line text)] for rm -r on a variable's contents where the variable may be empty."""
+    out, lines = [], text.splitlines()
+    for i, l in enumerate(lines):
+        t = l.strip()
+        if t.startswith("#"):
+            continue
+        # only the operands of the rm itself: not a case pattern or an mv on the same line
+        ops = [x.group(1) for x in re.finditer(r"\brm\s+(?:-\w+\s+)*-\w*[rR]\w*\s+((?:[^;&|)]|\\\n)*)", t)]
+        for m in (m for o in ops for m in _RM_BELOW.finditer(o)):
+            v = m.group(1)
+            ctx = " ".join(x.strip() for x in lines[max(0, i - 3):i + 1])
+            if m.group(2) or re.search(r"\[\[?\s+(?:!\s+)?-[dnze]\s+\"?\$\{?" + re.escape(v) + r"\b", ctx) or _var_safe(text, v, launch):
+                continue
+            out.append((i + 1, v, t[:100]))
+    return out
+
+
+def _script_files(port):
+    """[(path, text, is_launch_script)] for the launch scripts and the patchscripts they hand to PortMaster's Patcher."""
+    out, seen = [], set()
+    for s in port.scripts:
+        text = port.read_text(s)
+        out.append((s, text, True))
+        for m in re.finditer(r"PATCHER_FILE=[\"']?([^\"'\s]+)", text):
+            t = _resolve(port, m.group(1))
+            if t is not None and t.is_file() and t not in seen:
+                seen.add(t)
+                out.append((t, port.read_text(t), False))
+    return out
+
+
+@check
+def rm_variable(port):
+    """rm -rf "$DIR"/* where DIR is not known to hold a path: 1 of 1428 merged scripts (Wargus) has one, tools/build_port_files.py."""
+    if port.gamedir is None:
+        return
+    for path, body, launch in _script_files(port):
+        for n, v, line in rm_below_variable(body, launch):
+            origin = ("is never given a value in this script" if not re.search(r"^\s*(?:export\s+|local\s+)?" + re.escape(v) + r"=", body, re.M)
+                      else "is set from something that can be empty")
+            yield Finding("sh.rm-variable", WARN, f"`{line}` removes everything below ${v}, and {v} {origin}. If it is ever empty the command becomes "
+                          "`rm -rf /*`, and ports run as root.", file=port.rel(path), line=n,
+                          fix=f'Write `rm -rf "${{{v}:?}}"/*` (the script stops when {v} is empty) or test `[ -d "${v}" ]` first, as the merged Patcher scripts do.')
+
+
+def _code_lines(text):
+    return [(n, l.strip()) for n, l in enumerate(text.splitlines(), 1) if l.strip() and not l.strip().startswith("#")]
+
+
+@check
+def script_hygiene(port):
+    """Practices measured on the merged launch scripts and patchscripts (docs/patchscripts.md): chmod 777 on files, downloads while
+    running, unquoted rm -r, a patchscript that detects PortMaster again, a patchscript longer than any merged one."""
+    if port.gamedir is None:
+        return
+    for path, body, launch in _script_files(port):
+        f, code = port.rel(path), _code_lines(body)
+        # chmod 777 on files (chmod 666 /dev/uinput is the boilerplate and fine)
+        c = [(n, l) for n, l in code if re.search(r"\bchmod\s+(?:-\w+\s+)*777\b", l)]
+        if c:
+            rec = any(re.search(r"\s-\w*R", l) for _, l in c)
+            yield Finding("sh.chmod-777", INFO, f"`{c[0][1][:70]}` (line {c[0][0]}" + (f", and {len(c) - 1} more" if len(c) > 1 else "") + ") sets mode 777. "
+                          "The ports partition is FAT/exFAT and ignores modes, and on a CFW that honours them 777 makes the files writable by everyone"
+                          + (" (here recursively for a whole folder)" if rec else "") + ". Executables only need `+x`.",
+                          file=f, line=c[0][0], fix='$ESUDO chmod +x "$GAMEDIR/tools/<tool>"')
+        # a download while the script runs
+        net = [(n, l) for n, l in code if re.search(r"(?:^|[\s;&|(])(?:curl|wget)\s|\bgit\s+clone\b|\bpip3?\s+install\b|\bapt(?:-get)?\s+install\b", l)]
+        if net:
+            yield Finding("sh.network", WARN, f"The {'script' if launch else 'patchscript'} downloads while it runs (`{net[0][1][:80]}`). The file is not reviewed with the port, "
+                          "the handheld may be offline, and the source can change or disappear. 4 of 1428 merged launch scripts and 1 patchscript do this.",
+                          file=f, line=net[0][0],
+                          fix="Ship the file in the port if its licence allows, or ask the player to copy it as with other game files. If a download is unavoidable, "
+                              "check that it worked and show `pm_show_error` when it did not.")
+        # unquoted variables after rm -r
+        def _unquoted(l):
+            m = re.search(r"\brm\s+((?:-\w+\s+)+)(.*)", l)
+            if not m or not re.search(r"-\w*[rR]", m.group(1)):
+                return False
+            rest = re.split(r"\s*(?:[;&|>]|2>)", m.group(2))[0]
+            for _ in range(3):   # a command substitution inside quotes may hold quotes of its own
+                rest = re.sub(r"\$\([^()]*\)", "", rest)
+            return "$" in re.sub(r'"[^"]*"|\'[^\']*\'', "", rest)
+        uq = [(n, l) for n, l in code if _unquoted(l)]
+        if uq:
+            yield Finding("sh.unquoted-rm", INFO, f"`{uq[0][1][:70]}` (line {uq[0][0]}" + (f", and {len(uq) - 1} more lines" if len(uq) > 1 else "") + ") removes files "
+                          "with a variable outside quotes. A path with a space splits into several arguments, and an empty variable drops out of the command.",
+                          file=f, line=uq[0][0], fix='Quote it: `rm -rf "$DATADIR"/*.exe`.')
+        if launch:
+            # the PortMaster detection block: all but 2 of the 1423 merged scripts that have it use only the standard branches
+            hdr, found = [], False
+            for n, l in code:
+                if re.match(r"(source|\.)\s+\"?\$\{?controlfolder\}?/control\.txt", l.strip()):
+                    found = True
+                    break
+                hdr.append((n, l.strip()))
+            if found and any(l.startswith("XDG_DATA_HOME") for _, l in hdr):
+                std = ('XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}', 'if [ -d "/opt/system/Tools/PortMaster/" ]; then', 'controlfolder="/opt/system/Tools/PortMaster"',
+                       'elif [ -d "/opt/tools/PortMaster/" ]; then', 'controlfolder="/opt/tools/PortMaster"', 'elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then',
+                       'controlfolder="$XDG_DATA_HOME/PortMaster"', "else", 'controlfolder="/roms/ports/PortMaster"', "fi")
+                odd = [(n, l) for n, l in hdr if l and l not in std and re.match(r"(?:if|elif|else|\[|\[\[|\$|controlfolder=|[a-z_]+\()", l)]
+                if odd:
+                    yield Finding("sh.header-modified", WARN, f"The PortMaster detection block at the top of the script is not the standard one: {len(odd)} line{'s' if len(odd) > 1 else ''} "
+                                  f"differ (`{odd[0][1][:70]}`, line {odd[0][0]}). All but 2 of the 1423 merged scripts that have the block use exactly these branches. "
+                                  "A port with its own search order can pick another PortMaster folder than every other port on the same device, and nobody can tell from the "
+                                  "script alone which CFW needs the extra branch.",
+                                  file=f, line=odd[0][0], fix="Use the header from the template unchanged. If a CFW installs PortMaster somewhere the header misses, that fix belongs in the template, for every port.")
+            gc = [(n, l) for n, l in code if re.match(r"get_controls\b", l.strip())]
+            if gc:
+                nxt = next(((n, l) for n, l in code if n > gc[0][0]), None)
+                if nxt and re.match(r"\w+=\$\?\s*$", nxt[1].strip()):
+                    yield Finding("sh.controls-status", WARN, f"The script keeps the result of `get_controls` (`{nxt[1].strip()}`, line {nxt[0]}) and stops later when it is not 0. None of the "
+                                  f"{data.PORT_FILES['scripts']} merged scripts does this. `get_controls` sets up the controls and the script does not need its exit code: "
+                                  "a failure there shows as a game without controls, and the port keeps running on every PortMaster version the other ports support.",
+                                  file=f, line=nxt[0], fix="Call `get_controls` on its own line, as the template does, and drop the status checks.")
+            gd = [(n, l) for n, l in code if re.search(r"(?:^|&&\s*|;\s*|\bthen\s+)(?:export\s+)?GAMEDIR=", l.strip())]
+            if len(gd) > 1:
+                yield Finding("sh.gamedir-search", WARN, f"The script looks for its own game folder: `GAMEDIR` is set a second time, e.g. from a search loop (line {gd[-1][0]}). "
+                              f"Merged scripts set it once, `GAMEDIR=\"/$directory/ports/<name>\"`, because `control.txt` already says where the ports folder is. "
+                              "A search over `$0` and relative folders finds a different copy of the port than the one PortMaster installed, and has to be re-checked on every CFW.",
+                              file=f, line=gd[-1][0], fix='GAMEDIR="/$directory/ports/portname"')
+            lp = next(((n, l) for n, l in code if re.match(r"exec\s*>\s*>\(", l.strip()) and not re.match(r"exec\s*>\s*>\(\s*tee\b", l.strip())), None)
+            if lp:
+                yield Finding("sh.log-pipeline", WARN, f"The log goes through a pipeline of its own (`{lp[1].strip()[:70]}`, line {lp[0]}). The template and the other merged scripts use "
+                              "`exec > >(tee \"$GAMEDIR/log.txt\") 2>&1`. A custom pipeline cuts or loses the log exactly when something went wrong, and a tester cannot send it.",
+                              file=f, line=lp[0], fix='exec > >(tee "$GAMEDIR/log.txt") 2>&1')
+            pg = next(((n, l) for n, l in code if re.search(r"\b(?:declare\s+-F|type|command\s+-v)\s+pm_\w+|pm_(?:show_error|message)\b[^#\n]*\|\|\s*:", l)), None)
+            if pg:
+                yield Finding("sh.pm-guard", INFO, f"The script asks whether `pm_*` functions exist before it calls them (`{pg[1].strip()[:70]}`, line {pg[0]}). `control.txt` loads `funcs.txt`, "
+                              "and the template calls `pm_message`, `pm_show_error` and `pm_finish` directly. 1 of 1428 merged scripts guards them.",
+                              file=f, line=pg[0], fix="Call the functions directly, as the template does.")
+            tr = next(((n, l) for n, l in code if re.match(r"trap\s+(?:'[^']*'|\"[^\"]*\")\s+(?:\w+\s+)*(?:TERM|INT|SIGTERM|SIGINT)\b", l.strip())), None)
+            if tr:
+                yield Finding("sh.signal-handling", WARN, f"The script handles TERM/INT itself and forwards them to a child (`{tr[1].strip()[:70]}`, line {tr[0]}). None of the merged scripts does: "
+                              "gptokeyb2 stops the game with its hotkey, and `pm_finish` cleans up afterwards. Own signal code has to be right on every shell the CFWs ship.",
+                              file=f, line=tr[0], fix="Start the game in the foreground as the template does and let gptokeyb2 and `pm_finish` end it.")
+            um = next(((n, l) for n, l in code if re.match(r"umask\s+\d+", l)), None)
+            if um:
+                yield Finding("sh.umask", WARN, f"`{um[1][:40]}` (line {um[0]}) changes the file mode for everything the script and the game create. None of the "
+                              f"{data.PORT_FILES['scripts']} merged launch scripts does this. The ports partition ignores modes, and on a CFW that honours them "
+                              "saves and logs become unreadable for the other users of the device (file manager, FTP, SMB, the next PortMaster update).",
+                              file=f, line=um[0], fix="Drop the line.")
+            mk = next(((n, l) for n, l in code if re.search(r"\bmktemp\b[^#]*(?:GAMEDIR|logs?/|\.log)", l)), None)
+            if mk and not any(re.search(r"\b(?:rm|find)\b[^#]*(?:logs?\b|launch\.)", l) for _, l in code):
+                yield Finding("sh.log-per-launch", WARN, f"Every launch writes a new log file (`{mk[1][:70]}`, line {mk[0]}) and nothing deletes the old ones. Merged ports write "
+                              "one `log.txt` and truncate it on the next launch; here the folder grows by a file on every launch, on the SD card.",
+                              file=f, line=mk[0], fix='Write one file: `> "$GAMEDIR/log.txt" 2>&1` (the template does `exec > >(tee "$GAMEDIR/log.txt") 2>&1`).')
+        if not launch:
+            # control.txt already exported controlfolder and DEVICE_ARCH to the patchscript
+            det = [(n, l) for n, l in code if re.match(r"(?:export\s+)?controlfolder=|source\s+\"?\$\{?controlfolder\}?/control\.txt", l)]
+            if det:
+                yield Finding("patcher.controlfolder", INFO, f"The patchscript looks for PortMaster again (line {det[0][0]}). The launch script has already sourced control.txt, "
+                              "which exports `controlfolder` and `DEVICE_ARCH`, so the patchscript can use them as they are.", file=f, line=det[0][0],
+                              fix='Delete the detection block and use `"$controlfolder/xdelta3"`.')
+            top = data.PORT_FILES["patchscript"]["max"]
+            if len(code) > top:
+                yield Finding("patcher.length", INFO, f"The patchscript has {len(code)} lines of code. Merged patchscripts have a median of {data.PORT_FILES['patchscript']['p50']} and at most {top}.",
+                              file=f, fix="Split the work the game itself could do out of the patch step, and keep the patchscript to extracting, patching and cleaning up.")
+
+
+@check
+def bundled_tools(port):
+    """PortMaster ships xdelta3 and 7zzs next to control.txt; 33 and 22 merged ports bundle their own copies anyway."""
+    if port.gamedir is None:
+        return
+    for p in port.logical_files():
+        n = p.name.lower()
+        if re.match(r"xdelta3(\.\w+)?$", n):
+            yield Finding("files.bundled-tool", INFO, f"{port.rel(p)} is xdelta3, which PortMaster already ships next to control.txt.", file=port.rel(p),
+                          fix='Drop the copy and call `"$controlfolder/xdelta3"`.')
+        elif re.match(r"7z(?:a|z|zs|r)(\.\w+)?$", n):
+            yield Finding("files.bundled-tool", INFO, f"{port.rel(p)} is 7-Zip, which PortMaster already ships as `7zzs.$DEVICE_ARCH` next to control.txt.", file=port.rel(p),
+                          fix='Drop the copy and call `"$controlfolder/7zzs.$DEVICE_ARCH"`.')
+
+
+
+@check
+def loader_build(port):
+    """A shared runtime loader (gmloadernext.aarch64) that no merged port ships byte for byte."""
+    if port.gamedir is None:
+        return
+    for p in port.logical_files():
+        ref = data.KNOWN_BINARIES.get(p.name)
+        if not ref or not p.name.endswith(".aarch64"):
+            continue
+        raw = p.read_bytes()
+        sha = hashlib.sha1(b"blob %d\0" % len(raw) + raw).hexdigest()[:12]
+        if sha in ref["hashes"]:
+            continue
+        yield Finding("files.loader-build", INFO, f"{port.rel(p)} is not the same file as any of the {ref['copies']} copies in merged ports ({ref['builds']} builds; "
+                      f"{ref['own_build']} ports ship a build of their own). A rebuilt loader runs as root with the game's whole access, and a reviewer cannot see in a "
+                      "binary what was changed.",
+                      file=port.rel(p),
+                      fix="Use the loader from the template. If the port needs a patched one, link its source or diff in the README and the PR (the loader is GPL) "
+                          "and say what the patch changes and which device problem it fixes.")
+
+
+_MD_LINK = re.compile(r"(?<!!)\[[^\]\n]*\]\(\s*<?([^)\s>]+)")
+
+
+@check
+def dead_links(port):
+    """Relative links in the package's Markdown files that point at files the package does not contain (licence and source notices
+    that promise `artifacts/...` or `third_party/...` are the usual case)."""
+    if port.gamedir is None:
+        return
+    from urllib.parse import unquote
+    for p in port.logical_files():
+        if p.suffix.lower() != ".md" or p.stat().st_size > 1_000_000:
+            continue
+        if any(part.lower() in ("licenses", "license") for part in p.relative_to(port.root).parts[:-1]):
+            continue   # upstream licence texts and READMEs copied as they are; their links point into their own repository
+        text = re.sub(r"```.*?```", "", port.read_text(p), flags=re.S)
+        missing = []
+        for m in _MD_LINK.finditer(text):
+            tgt = m.group(1)
+            if re.match(r"[a-z][a-z0-9+.-]*:|#|/|\{|\$", tgt, re.I):
+                continue
+            rel = unquote(tgt.split("#")[0].split("?")[0])
+            if rel and not (p.parent / rel).exists() and rel not in missing:
+                missing.append(rel)
+        if missing:
+            yield Finding("files.dead-link", WARN, f"{port.rel(p)} links to {len(missing)} file{'s' if len(missing) > 1 else ''} the package does not contain: "
+                          f"{', '.join('`' + x + '`' for x in missing[:5])}{', ...' if len(missing) > 5 else ''}. A licence or source notice that points at a missing file "
+                          "does not give anyone the text or the source it promises.",
+                          file=port.rel(p), fix="Add the files, or change the notice to a link that works (the upstream repository and tag) and delete the rest.")
+
+
+@check
+def unstripped_binaries(port):
+    """Native files with debug sections: size the player downloads and copies to the SD card for nothing."""
+    if port.gamedir is None:
+        return
+    big = []
+    for p in port.logical_files():
+        try:
+            if p.stat().st_size < 1_000_000:
+                continue
+            with open(p, "rb") as fh:
+                head = fh.read(4)
+                if head != b"\x7fELF":
+                    continue
+                fh.seek(0)
+                raw = fh.read()
+        except OSError:
+            continue
+        if b".debug_info" not in raw:
+            continue
+        ref = data.KNOWN_BINARIES.get(p.name)   # the shared Android libs (libc++_shared.so ...) ship with debug sections in 360+ merged ports
+        if ref and hashlib.sha1(b"blob %d\0" % len(raw) + raw).hexdigest()[:12] in ref["hashes"]:
+            continue
+        big.append((len(raw), p))
+    if big:
+        total = sum(n for n, _ in big)
+        yield Finding("libs.unstripped", INFO, f"{', '.join(f'{port.rel(p)} ({n / 1048576:.1f} MB)' for n, p in sorted(big, reverse=True)[:3])} "
+                      f"{'has' if len(big) == 1 else 'have'} debug sections that nothing on the device reads"
+                      f"{f' ({len(big)} files, {total / 1048576:.1f} MB together)' if len(big) > 1 else ''}.",
+                      file=port.rel(sorted(big, reverse=True)[0][1]), fix="Run `strip --strip-unneeded` on it and ship the stripped file.")
 
 @check
 def script_platform(port):

@@ -599,6 +599,19 @@ class BadPorts(unittest.TestCase):
             (Path(t) / "testgame" / "cover.png").write_bytes(png(64, 64) + os.urandom(120 * 1024))
             self.assertIn("images.size", rules_of(t))
 
+    def test_image_size_just_over_limit_is_not_shown_as_equal(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            img = Path(t) / "testgame" / "cover.png"
+            img.write_bytes(png(64, 64) + b"\0" * (100 * 1024 + 700 - len(png(64, 64))))
+            port = load(t)
+            try:
+                msgs = [f.message for f in run_all(port) if f.rule == "images.size"]
+            finally:
+                port.cleanup()
+            self.assertEqual(len(msgs), 1)
+            self.assertIn("100.7 KB (limit 100 KB)", msgs[0])
+
 
 class Ini(unittest.TestCase):
     def test_bad_key(self):

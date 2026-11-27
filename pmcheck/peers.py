@@ -111,3 +111,25 @@ def url(peer):
 def raw_url(peer):
     from urllib.parse import quote
     return f"{RAW}/{quote(peer['name'])}/{quote(peer['script'])}"
+
+
+# a line that runs a script through an interpreter: `python3 x.py`, `/usr/bin/python3 -I -B "$dir/x.py" &`, `bash x.sh`
+_RUN = re.compile(r"(?:^|[\s;|&(]|then\s)(?:exec\s+)?(?:/usr/bin/(?:env\s+)?)?(?:python3?[\d.]*|bash|sh)\s+(?:-[A-Za-z]+\s+)*[\"']?[^\s\"']+\.(?:py|sh)\b")
+# a line that starts an engine or the game binary itself, or the controller mapper that goes with it
+_BIN = re.compile(r"^(?:\$ESUDO\s+|exec\s+|[A-Za-z_]+=\S*\s+)*(?:\./[\w.\-]+|\"?\$\{?(?:GAMEDIR|BINARY|[A-Za-z_]*(?:dir|DIR|BIN|bin))\}?\"?/[\w./\-${}]+"
+                  r"|\"?\$\{?BINARY\}?\"?|\$(?:LOVE|GODOT|FRT|MONO|DOTNET|JAVA)\w*|love\b|java\b|mono\b|dotnet\b|box64\b|box86\b|westonwrap\w*|\$weston\w*|\$GPTOKEYB2?\b)")
+ENGINE_SCRIPT_KINDS = ("python", "renpy+python")   # the game itself is a script there
+
+
+def indirect_launch(text):
+    """(line number, line) of a script that starts the game through another script, else None. A helper run before the
+    game (patching, fingerprinting, settings) is followed by the engine's own command; only a script after which nothing
+    starts a binary counts. No merged PortMaster-New script does this (tools/build_port_files.py)."""
+    if kind(tags(text)) in ENGINE_SCRIPT_KINDS:
+        return None
+    code = [(n, l.strip()) for n, l in enumerate(text.splitlines(), 1) if l.strip() and not l.strip().startswith("#")]
+    for i, (n, l) in enumerate(code):
+        if _RUN.search(l) and not re.match(r"(?:if|elif|\[|!)\b", l):
+            if not any(_BIN.match(r) for _, r in code[i + 1:]):
+                return n, l
+    return None

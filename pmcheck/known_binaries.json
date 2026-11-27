@@ -1,0 +1,828 @@
+{
+"generated": "2026-11-27",
+"binaries": {
+"gmloadernext.aarch64": {
+"copies": 322,
+"builds": 19,
+"own_build": 5,
+"hashes": [
+"06a1fd71c393",
+"17b1c2a3f983",
+"1848e3c12bcf",
+"3c9e0c10dde1",
+"4429c87c4f1c",
+"4d3bb77d7456",
+"5742f8d7b9b7",
+"76565cd046f3",
+"76a6e18d0051",
+"84858240a512",
+"8f1d9fad9e02",
+"97cad5b7db77",
+"a87b7ec64ce9",
+"bd0cb4c92652",
+"d5f51ac0afa9",
+"e100050f5384",
+"f026c45394a6",
+"f547168d80db",
+"f58f8e3dfd53"
+]
+},
+"libEGL.so.1": {
+"copies": 70,
+"builds": 17,
+"own_build": 9,
+"hashes": [
+"00ca8aa5e869",
+"1a46eeceb3bb",
+"301392656cd1",
+"5fa05f8b89b1",
+"69800f57dfd3",
+"7ad63cc28f60",
+"863418b02b70",
+"9ba93b6b9cd5",
+"9e2b444b3d1d",
+"a2289d4b3257",
+"b416665454e6",
+"b8677bf5286e",
+"cffee1622016",
+"e2e0d939550c",
+"e5f36f53c77d",
+"ec7fb3967508",
+"f68846dd7c46"
+]
+},
+"libFAudio.so.0": {
+"copies": 21,
+"builds": 5,
+"own_build": 2,
+"hashes": [
+"08afbe4fc284",
+"4ed2e92b0675",
+"55f5a75926f8",
+"a12f9fbcc8d0",
+"dfd43b048d76"
+]
+},
+"libFLAC.so.8": {
+"copies": 128,
+"builds": 11,
+"own_build": 1,
+"hashes": [
+"004f715932d9",
+"15c6137f8bb6",
+"3ad8a567875e",
+"55dd662ea6e3",
+"656addde97ea",
+"6d6b1d9e1507",
+"af40860ac9af",
+"be583a3f81d2",
+"d598b163477e",
+"d64ad6c350b0",
+"f09acd2f8bba"
+]
+},
+"libFNA3D.so.0": {
+"copies": 21,
+"builds": 6,
+"own_build": 2,
+"hashes": [
+"147d32f1eb05",
+"37b2227a52a8",
+"648f2591bb2b",
+"97398df373b0",
+"9996d94ad1b2",
+"d3ec43a4cb97"
+]
+},
+"libGL.so.1": {
+"copies": 106,
+"builds": 32,
+"own_build": 15,
+"hashes": [
+"237f0561f74b",
+"28ae2cc61a00",
+"2a654e475c0b",
+"2cb1e3506a8a",
+"34bf888d6276",
+"383fc53515df",
+"3cac761f7e82",
+"42484647baaa",
+"43bf565d8415",
+"484890ca6b8e",
+"4affc1374763",
+"4eb652ce202b",
+"557adee7f524",
+"68058734bd92",
+"6921a75cd986",
+"6a233a2c9129",
+"7210daabd0de",
+"760bc7953e14",
+"8e0e944a3beb",
+"97f71bbedf93",
+"985f5c8586b3",
+"9974097971d6",
+"a8a44e87728a",
+"afaeccdf1858",
+"b2c0c633e6f7",
+"b2fe743db193",
+"bdf3daf07692",
+"c1bac1a63a9f",
+"d307f5bd1a11",
+"d770137ca930",
+"f1c1492ed2c8",
+"fb01fd389978"
+]
+},
+"libGLU.so.1": {
+"copies": 24,
+"builds": 6,
+"own_build": 2,
+"hashes": [
+"1b19ad83499a",
+"1b210bbd8e36",
+"31e1e3f3fb65",
+"76de3ad8018c",
+"9af43ffff55d",
+"bb8e39485d8d"
+]
+},
+"libSDL-1.2.so.0": {
+"copies": 107,
+"builds": 29,
+"own_build": 13,
+"hashes": [
+"01c9557a5148",
+"071d6b9007d4",
+"081b076d6a5e",
+"14524ea5f3a2",
+"1965b716b68d",
+"2edcb3651846",
+"4514177cba91",
+"46d547153bdd",
+"4a2e589fa87a",
+"4af963fea9f1",
+"54ae4c7114e2",
+"58bad06fd251",
+"62cd7a4c753f",
+"7253a18ca384",
+"72c905a58b2c",
+"9bc824bb7c6b",
+"9e14c0f1efb1",
+"a0e4899da6ce",
+"a4cbc7db0e98",
+"c7d29cdf6fca",
+"c989b56b424d",
+"c9fa87d57f43",
+"d6a7d16c27bb",
+"d6d222ee9c68",
+"dc4f0e0bfbb1",
+"eb57f2647c40",
+"f549c5781a1a",
+"f85562c0a232",
+"ffada506d0df"
+]
+},
+"libSDL_image-1.2.so.0": {
+"copies": 58,
+"builds": 9,
+"own_build": 4,
+"hashes": [
+"26e38ce7e7d1",
+"354d6fae3d36",
+"3c176a96dbec",
+"6334a8164e4b",
+"69bcf15706d8",
+"800cac33e954",
+"8f6fd32205e7",
+"badcd9c0012c",
+"f44225ffebc5"
+]
+},
+"libSDL_mixer-1.2.so.0": {
+"copies": 68,
+"builds": 11,
+"own_build": 4,
+"hashes": [
+"039d44f26c14",
+"0ccf5416b9c8",
+"34dd84bac6ca",
+"4b72014b0ccd",
+"4c7d2044116b",
+"619e2d711726",
+"717ec0b3758b",
+"8df5229ba337",
+"a33c216102a4",
+"e2ae08497954",
+"e5c50ab0c6e0"
+]
+},
+"libX11.so.6": {
+"copies": 53,
+"builds": 12,
+"own_build": 5,
+"hashes": [
+"0223d142edfc",
+"02539ade2cf2",
+"3cfedbdb9253",
+"470c388f37be",
+"509f3e0e9cc5",
+"71dff3f288b0",
+"93906ee46257",
+"b58915704b87",
+"b9ce505f4650",
+"c6a6bf0eb603",
+"ce1acdc566d8",
+"f5d216ac2e5f"
+]
+},
+"libXau.so.6": {
+"copies": 55,
+"builds": 7,
+"own_build": 1,
+"hashes": [
+"302d9c1d2639",
+"338d63b32fed",
+"61ada60860e7",
+"705754f4583a",
+"71e5da48aed5",
+"9f2696e2d6e2",
+"df40913016c3"
+]
+},
+"libXdmcp.so.6": {
+"copies": 55,
+"builds": 5,
+"own_build": 0,
+"hashes": [
+"026e758e0812",
+"1c34f056c25b",
+"2c935ce03cc1",
+"7f73a48a1cb3",
+"e55e1ee33d95"
+]
+},
+"libXext.so.6": {
+"copies": 20,
+"builds": 3,
+"own_build": 2,
+"hashes": [
+"409cac9d78e1",
+"a1629addedcb",
+"d3ebcb982038"
+]
+},
+"libboost_program_options.so.1.71.0": {
+"copies": 20,
+"builds": 2,
+"own_build": 1,
+"hashes": [
+"9c8eda09dcd9",
+"fb834f204243"
+]
+},
+"libbsd.so.0": {
+"copies": 53,
+"builds": 9,
+"own_build": 4,
+"hashes": [
+"0925caead4dc",
+"2199c4b31dbe",
+"77f19cd5ce24",
+"7e3d7f5b927e",
+"8b409d031ff7",
+"b2028409bc74",
+"d04a683da9c8",
+"d8a4a4e999e6",
+"ec5288fd6b36"
+]
+},
+"libc++_shared.so": {
+"copies": 576,
+"builds": 5,
+"own_build": 1,
+"hashes": [
+"268934f5b3d1",
+"b25bc3cd7729",
+"c0944e8fa430",
+"ef2f3501e88a",
+"fb45ef905246"
+]
+},
+"libcompiler_rt.so": {
+"copies": 380,
+"builds": 4,
+"own_build": 0,
+"hashes": [
+"2da7a21e7c81",
+"8747b729b835",
+"b6c5de18274e",
+"f167a0d0116b"
+]
+},
+"libcrypt.so.1": {
+"copies": 29,
+"builds": 3,
+"own_build": 1,
+"hashes": [
+"1c5accc4a884",
+"ad9acb3e1b92",
+"bd1486f0884d"
+]
+},
+"libcrypto.so.1.1": {
+"copies": 403,
+"builds": 15,
+"own_build": 5,
+"hashes": [
+"0b3832c00cd0",
+"0c2963a6439c",
+"0daefab9ac97",
+"12578440aa31",
+"2d7f7955a20f",
+"36ecf04e295d",
+"5ec89209c9dd",
+"712bbae90fe3",
+"976e8aaf9f41",
+"ac4a64207a4f",
+"b7250454e71c",
+"db07ce58331e",
+"ec874d822104",
+"f709e1bfdfab",
+"faf4d9630e64"
+]
+},
+"libfluidsynth.so.1": {
+"copies": 26,
+"builds": 6,
+"own_build": 2,
+"hashes": [
+"304050c09b2b",
+"43291a5cbd85",
+"4514eecc989c",
+"52680258b264",
+"559c9b7b4600",
+"97fd00265268"
+]
+},
+"libfluidsynth.so.2": {
+"copies": 38,
+"builds": 5,
+"own_build": 3,
+"hashes": [
+"4514eecc989c",
+"6eedc863f283",
+"9b811a37379a",
+"e5c1030ba537",
+"fe8a3b52ccb6"
+]
+},
+"libgcc_s.so.1": {
+"copies": 27,
+"builds": 6,
+"own_build": 1,
+"hashes": [
+"0c99e79eb38b",
+"1220793697ad",
+"1387137144d6",
+"27b054853cc3",
+"51d6e3fc498e",
+"75a37c49d784"
+]
+},
+"libinstpatch-1.0.so.2": {
+"copies": 41,
+"builds": 6,
+"own_build": 3,
+"hashes": [
+"08c7f0b74a3e",
+"1e3cd9a53d86",
+"22e009ad7571",
+"56c36e17352c",
+"7a222ea7620e",
+"b775c92e63bb"
+]
+},
+"libjack.so.0": {
+"copies": 58,
+"builds": 9,
+"own_build": 4,
+"hashes": [
+"2d09d629f3a4",
+"53eda3c0af9d",
+"640aa0882bd5",
+"6750f592808d",
+"74af97edc986",
+"85aa910b6c98",
+"8a11883411fe",
+"a9635b43db8b",
+"c21745edaa81"
+]
+},
+"libjbig.so.0": {
+"copies": 58,
+"builds": 8,
+"own_build": 2,
+"hashes": [
+"0a0f8fc2572c",
+"1817694b361f",
+"7c43b925a654",
+"8d2896b89e99",
+"b670058b3208",
+"c0510b924aee",
+"d4437b1b7329",
+"e030302f012e"
+]
+},
+"libjpeg.so.62": {
+"copies": 21,
+"builds": 8,
+"own_build": 4,
+"hashes": [
+"1889449c0b30",
+"2e349dc2c0f3",
+"39f10fd27be3",
+"80f739b0e97c",
+"b13245d52e5d",
+"c4f190bf28cc",
+"c5df3f938e1b",
+"cca1dab601fe"
+]
+},
+"liblove-11.5.so": {
+"copies": 31,
+"builds": 1,
+"own_build": 0,
+"hashes": [
+"f28fbe1f41b3"
+]
+},
+"libluajit-5.1.so.2": {
+"copies": 45,
+"builds": 8,
+"own_build": 4,
+"hashes": [
+"1def97715263",
+"729a3cda1900",
+"c47785f10ef4",
+"cb9ed3a6baab",
+"cbc721c447ab",
+"e3eb0f95fba4",
+"e63d553fdabc",
+"f60561d237f8"
+]
+},
+"liblzma.so.5": {
+"copies": 86,
+"builds": 15,
+"own_build": 6,
+"hashes": [
+"128fd7091748",
+"210f040d339e",
+"4db994fca2da",
+"59e3adef2e35",
+"67b6dfaac316",
+"6b70a9429662",
+"6df349ff7076",
+"79ecb1ea18fc",
+"7dfae0bd9ee7",
+"7e9bed0d167e",
+"a927960b17d1",
+"b5e8345bbb96",
+"d80d6d14f122",
+"ecb81c8bc4d4",
+"f87132219a87"
+]
+},
+"libm.so": {
+"copies": 380,
+"builds": 4,
+"own_build": 0,
+"hashes": [
+"2af51edd93fb",
+"603c19afe572",
+"639687fc1f59",
+"ad61d58bd673"
+]
+},
+"libmad.so.0": {
+"copies": 53,
+"builds": 7,
+"own_build": 2,
+"hashes": [
+"4683fb399f48",
+"6a5934b61a4f",
+"6c18ead0562e",
+"e086a51bdf45",
+"e614e6470a91",
+"f22b7fb01cd0",
+"ff25d8a0eced"
+]
+},
+"libmikmod.so.3": {
+"copies": 70,
+"builds": 10,
+"own_build": 4,
+"hashes": [
+"45a9a7960822",
+"475d00a1b3b6",
+"564b71602d7f",
+"5fe7a155ceb0",
+"6ead5eb3909d",
+"755a1ed68383",
+"7e300a8db837",
+"a5ecc83e74cd",
+"acf037d2e4a6",
+"cea87207c4df"
+]
+},
+"libmodplug.so.1": {
+"copies": 62,
+"builds": 6,
+"own_build": 1,
+"hashes": [
+"03ca8e1f8ba4",
+"0be351ea4f7c",
+"1511a6622d1d",
+"2c732bddcd36",
+"800f5faa16d4",
+"ef44bc7b0def"
+]
+},
+"libogg.so.0": {
+"copies": 190,
+"builds": 13,
+"own_build": 4,
+"hashes": [
+"0abc5e0f703f",
+"0b288ae06aa1",
+"0f6ed4646bef",
+"1559d8e0752d",
+"5497ed0ae2f1",
+"5b4a7567f65b",
+"61b67ee438ae",
+"6b894f757ae5",
+"a0f28af0c8a7",
+"cc41d3b1d0e3",
+"d36d64bea94a",
+"e535c149d5d5",
+"eca74c769abf"
+]
+},
+"libopenal.so.1": {
+"copies": 205,
+"builds": 10,
+"own_build": 4,
+"hashes": [
+"2f3490e64ee4",
+"4c1e9038a973",
+"4e7fe82f32ea",
+"56805aa71179",
+"5fadf124b688",
+"6a6a301ef1aa",
+"82690631f350",
+"8ab30657404f",
+"bd4708d17ee8",
+"f3828a4ec586"
+]
+},
+"libopus.so.0": {
+"copies": 22,
+"builds": 7,
+"own_build": 3,
+"hashes": [
+"003f8dd19715",
+"8359d930d687",
+"8f059c0ab71a",
+"a6c63d73db61",
+"c0c97192c185",
+"d5cb74a0d293",
+"f2d03685a878"
+]
+},
+"libphysfs.so.1": {
+"copies": 41,
+"builds": 5,
+"own_build": 1,
+"hashes": [
+"5abe08a9a5e4",
+"96f685870f62",
+"b637b3b1cbc5",
+"f54abf7cace3",
+"fa7144a9c693"
+]
+},
+"libpng16.so.16": {
+"copies": 20,
+"builds": 7,
+"own_build": 3,
+"hashes": [
+"30dbb4445163",
+"30f8bcefdd6f",
+"39b3666d61b4",
+"5b88fd9e25c9",
+"89192643009f",
+"cbf2f7d3c604",
+"eba9fd31d3ca"
+]
+},
+"libreadline.so.8": {
+"copies": 49,
+"builds": 7,
+"own_build": 3,
+"hashes": [
+"14f50cae168b",
+"653152f5153d",
+"6d981a0590c6",
+"8a09968fcb04",
+"9efa6dd1a799",
+"a885a59896ae",
+"fcbda853e553"
+]
+},
+"libssl.so.1.1": {
+"copies": 62,
+"builds": 11,
+"own_build": 5,
+"hashes": [
+"050bd73304f3",
+"3109e6c4556e",
+"376569c1f132",
+"51fcd51342bd",
+"905314b59028",
+"942fc96f9f4d",
+"a71e2240b553",
+"b3714c43a6f9",
+"bef0c6219116",
+"bf911ceb0b3b",
+"f94835c02f73"
+]
+},
+"libstdc++.so.6": {
+"copies": 25,
+"builds": 6,
+"own_build": 2,
+"hashes": [
+"51d70e102a03",
+"8809b4f006e4",
+"9e8695677f5d",
+"aba8da238d94",
+"d32ab5490fd6",
+"f26626c067e8"
+]
+},
+"libtiff.so.5": {
+"copies": 56,
+"builds": 13,
+"own_build": 5,
+"hashes": [
+"0b64823a8257",
+"0cdc307fa670",
+"0febe22751d1",
+"2a84efcc1ba0",
+"4b57f7c20c9f",
+"7ade9abc1ca6",
+"9552a82606a5",
+"a681eeb7fe87",
+"b545258133f5",
+"b63689466e27",
+"dd9fff02d11b",
+"e9e8bcb5d6be",
+"fdec57db3be4"
+]
+},
+"libtinfo.so.6": {
+"copies": 77,
+"builds": 12,
+"own_build": 5,
+"hashes": [
+"1297f2958ce4",
+"239489b8de80",
+"38ed5128e0e9",
+"470a3a78d59f",
+"5501aff63b3c",
+"75dba18ea32f",
+"9f45ab902318",
+"a3dfa65cb375",
+"a9954359b2e2",
+"cb182ca3270b",
+"dcf1986cba4b",
+"f94979dae14c"
+]
+},
+"libvorbis.so.0": {
+"copies": 57,
+"builds": 9,
+"own_build": 2,
+"hashes": [
+"1496cbcdcb44",
+"2ecfccb188a5",
+"5b7344032348",
+"6209c66e2f55",
+"6325b63da05e",
+"6542a7d6e9f2",
+"70daa554d761",
+"8ac3a78f55d5",
+"daa5d8131303"
+]
+},
+"libvorbisenc.so.2": {
+"copies": 50,
+"builds": 7,
+"own_build": 2,
+"hashes": [
+"156a11284cc8",
+"3b2134914c9d",
+"69bfe270f17c",
+"6d5eb4385c1d",
+"a8c69fcd7f62",
+"c7050cc5c7c2",
+"da5fe390246b"
+]
+},
+"libwebp.so.6": {
+"copies": 55,
+"builds": 9,
+"own_build": 3,
+"hashes": [
+"03d8582ed818",
+"395112ed4364",
+"602e1e9a0cc3",
+"b3a04ab6407f",
+"e9a2e614658a",
+"e9ecc2cf450c",
+"f284c9d747ee",
+"fb3bd54303a7",
+"fe80fdb8bcb3"
+]
+},
+"libxcb.so.1": {
+"copies": 58,
+"builds": 9,
+"own_build": 1,
+"hashes": [
+"2d023b852c5f",
+"6e4798659555",
+"8020382560a1",
+"9faf420eee6a",
+"ad925068399f",
+"ae4c622e1cce",
+"ce813e56483c",
+"e8aa53927497",
+"ebc2ad49cb60"
+]
+},
+"libz.so.1": {
+"copies": 27,
+"builds": 8,
+"own_build": 1,
+"hashes": [
+"09d8d0cb5a6f",
+"3b9e42a6d2da",
+"5bb505a0f5d3",
+"7064e8ed25cd",
+"97c2331f7632",
+"bd680ceac0c1",
+"c52b56d152a8",
+"fef2cf2256b6"
+]
+},
+"libzip.so.4": {
+"copies": 147,
+"builds": 3,
+"own_build": 1,
+"hashes": [
+"1639041745ae",
+"6733e333a524",
+"bc3ef2300d62"
+]
+},
+"libzip.so.5": {
+"copies": 257,
+"builds": 4,
+"own_build": 1,
+"hashes": [
+"0908c68657be",
+"6733e333a524",
+"6807086bbc74",
+"bfb66900c251"
+]
+},
+"libzstd.so.1": {
+"copies": 30,
+"builds": 10,
+"own_build": 6,
+"hashes": [
+"00b68340414d",
+"1018c4c67d55",
+"12224e592b3a",
+"1eac92c09e7d",
+"2de969d72e13",
+"88b67afd1fe6",
+"9867016c3713",
+"ce8a7f0f67e7",
+"e05b2ede40ac",
+"fb4c8f873c7e"
+]
+}
+}
+}
