@@ -764,7 +764,7 @@ class Guidance(unittest.TestCase):
     def test_layout_note_with_links(self):
         from pmcheck.guidance import guidance
         note = guidance(self.fs("sh.boilerplate", "files.missing"))
-        self.assertIn("does not follow the PortMaster layout", note)
+        self.assertIn("2 of the 2 findings below are about how the package", note)
         self.assertIn("portmaster.games/contribute/porting/packaging/", note)
         self.assertIn("discord.com/channels/1122861252088172575/1232622554984878120", note)
         self.assertNotIn("AI assistant", note)
@@ -779,4 +779,4 @@ class Guidance(unittest.TestCase):
     def test_report_leads_with_the_note(self):
         from pmcheck.report import markdown
         md = markdown("p", self.fs("sh.boilerplate", "files.missing"))
-        self.assertLess(md.index("does not follow the PortMaster layout"), md.index("## ⚠️ WARN"))
+        self.assertLess(md.index("findings below are about how the package"), md.index("## ⚠️ WARN"))

@@ -20,18 +20,26 @@ def _ids(findings, group):
 
 
 def guidance(findings, links=True):
-    """Markdown paragraphs, or "" when neither pattern is present. links=False wraps URLs in <> for Discord (no embeds)."""
+    """Markdown paragraphs, or "" when neither pattern is present. links=False wraps URLs in <> for Discord (no embeds).
+    The counts change with every re-run, so a porter fixing things sees the note shrink and then go."""
     u = (lambda x: x) if links else (lambda x: f"<{x}>")
     structure = _ids(findings, STRUCTURE)
     shaped = _ids(findings, AI_SHAPED)
+    total = len(findings)
+    n_structure = sum(1 for f in findings if f.rule in STRUCTURE)
+    n_shaped = sum(1 for f in findings if f.rule in AI_SHAPED)
     out = []
     if len(structure) >= 2 or any(r.startswith("structure.no-") for r in structure):
-        out.append("**The package or the launch script does not follow the PortMaster layout.** Most of the list below comes from that, so fixing the layout first "
-                   "clears much of it. How a port is put together: the packaging guide "
-                   f"{u(data.PACKAGING_GUIDE)}, the script templates {u(data.SCRIPT_TEMPLATES)}, and the #your-first-port channel on Discord {u(data.DISCORD_FIRST_PORT)}.")
+        out.append(f"**{n_structure} of the {total} findings below are about how the package and the launch script are laid out.** Fixing those first usually clears more of the list. "
+                   "To learn how a port is put together and how the launch scripts need to look here:\n"
+                   f"- Packaging guide: {u(data.PACKAGING_GUIDE)}\n"
+                   f"- Script templates: {u(data.SCRIPT_TEMPLATES)}\n"
+                   f"- The #your-first-port channel on Discord: {u(data.DISCORD_FIRST_PORT)}")
     if len(shaped) >= 3:
-        out.append("**Several findings are typical of a script written with an AI assistant:** blocks that add checks, logging, fallbacks or helper programs that PortMaster "
-                   "and the template already provide. Using an AI is fine, and it helps to say so in the PR. Please read every line, delete what you cannot explain, "
-                   "and build the script from a merged port that is close to yours instead of from a generic template. The AI porting reference is pinned in the "
-                   f"#your-first-port channel {u(data.DISCORD_FIRST_PORT)}; the short version is on {u(data.FIRST_PORT_GUIDE)}.")
+        out.append(f"**{n_shaped} findings are typical of a script written or extended with an AI assistant:** blocks that add checks, logging or fallbacks "
+                   "that PortMaster and the template already provide. AI tools are welcome here, and saying so in the PR helps the reviewers. Before you submit:\n"
+                   "- Read every line, and take out what you cannot explain. Most merged ports are short.\n"
+                   "- Base the script on a merged port that is close to yours, not on a generic template.\n\n"
+                   f"The #your-first-port channel has a complete porting reference written for AI-assisted porting, kept up to date there: {u(data.DISCORD_FIRST_PORT)}. "
+                   f"The short version is on {u(data.FIRST_PORT_GUIDE)}.")
     return "\n\n".join(out)
