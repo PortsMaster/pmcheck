@@ -1529,6 +1529,17 @@ def script_hygiene(port):
                 yield Finding("sh.signal-handling", WARN, f"The script handles TERM/INT itself and forwards them to a child (`{tr[1].strip()[:70]}`, line {tr[0]}). None of the merged scripts does: "
                               "gptokeyb2 stops the game with its hotkey, and `pm_finish` cleans up afterwards. Own signal code has to be right on every shell the CFWs ship.",
                               file=f, line=tr[0], fix="Start the game in the foreground as the template does and let gptokeyb2 and `pm_finish` end it.")
+            sysvars = {m.group(1) for _, l in code for m in [re.match(r"(?:export\s+|readonly\s+)?(\w+)=[\"']?/sys/", l.strip())] if m}
+            wr = next(((n, l) for n, l in code
+                       if re.search(r"(?:>>?|\btee\s+(?:-a\s+)?)\s*[\"']?(?:/sys/" + ("".join(f"|\\$\\{{?{v}\\}}?" for v in sorted(sysvars))) + r")", l)), None)
+            if wr:
+                gov = bool(re.search(r"cpufreq|devfreq|governor|scaling_|cpu\d*/online", wr[1] + " ".join(sysvars)) or any("cpufreq" in l or "governor" in l for _, l in code))
+                yield Finding("sh.sysfs-write", WARN, f"The script writes to /sys (`{wr[1].strip()[:70]}`, line {wr[0]})" + (" to change the CPU governor or frequency" if gov else "") + ". "
+                              "None of the 1428 merged launch scripts writes there. It overrides what the CFW or the player set, "
+                              "only works where the port may write to /sys, and when the game crashes or is killed the device can stay in the changed state."
+                              + (" PortMaster has its own helper for CPU placement: `source \"$controlfolder/tasksetter\"` provides `$TASKSET`, which pins a game to the fastest cores (43 merged ports use it)." if gov else ""),
+                              file=f, line=wr[0],
+                              fix=('Drop the governor code. For CPU placement add `source "$controlfolder/tasksetter"` and start the game with `$TASKSET "$GAMEDIR/$BINARY"`.' if gov else "Drop the write; if the game really needs it, say which device problem it fixes."))
             um = next(((n, l) for n, l in code if re.match(r"umask\s+\d+", l)), None)
             if um:
                 yield Finding("sh.umask", WARN, f"`{um[1][:40]}` (line {um[0]}) changes the file mode for everything the script and the game create. None of the "
@@ -2171,7 +2182,7 @@ def _script(port, s):
         if (nxt is not None and re.match(r"\s*exit\s+[1-9]", nxt)
                 and not any(re.search(r"\bpm_(message|show_error)\b", x) for x in near)):
             yield Finding("sh.echo-message", WARN, "This message goes to the log, the player never sees it before the exit.", file=f, line=n,
-                          fix='pm_message "..." then sleep 5 before the exit (works on every PortMaster version)')
+                          fix='pm_show_error "..." --title "..." before the exit (an older PortMaster shows the text alone)')
     launch = re.compile(r"^\s*(?:\w+=\S+\s+)*(?:\$\{?TASKSET\}?\s+|\$ESUDO\s+)?(?:\"?\$\{?GAMEDIR\}?/|\./|\"?\$\{?BINARY\}?\b|mono\b|java\b|\$\{?LOVE_RUN\}?|\$\{?GMLOADER\}?)")
     text_cmd = re.compile(r"\s*(printf|echo|cat)\b")
     for i, (n, l) in enumerate(code):
@@ -2215,7 +2226,7 @@ def _script(port, s):
         if re.search(r"\\033c|\\e\[|\\033\[", l):
             continue   # clearing the console
         yield Finding("sh.tty-message", WARN, "Message written to the console TTY (old style); many CFWs show EmulationStation or nothing there.", file=f, line=n,
-                      fix='pm_message "..." then sleep 5 before the exit (works on every PortMaster version)')
+                      fix='pm_show_error "..." --title "..." before the exit (an older PortMaster shows the text alone)')
         break
     for n, l in grep(r"\bpm_(message|show_error)\s+--"):
         yield Finding("sh.pm_message-order", ERROR, "pm_message/pm_show_error take the message first, options after.", file=f, line=n)

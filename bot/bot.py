@@ -173,14 +173,19 @@ async def checkport(inter: discord.Interaction, url: str):
     if title:
         md = f"**{title}**\n<{url}>\n\n{md}"
     if len(md) <= 1900:
-        await inter.followup.send(md)
+        await inter.followup.send(md, suppress_embeds=True)
         return
     counts = "; ".join(f"**{r['port']}**: {r['counts']['ERROR']} errors, {r['counts']['WARN']} warnings, {r['counts']['INFO']} notes" for r in results)
     head = (f"**{title}**\n" if title else "") + counts + f". Full report attached (pmcheck {__version__})."
     if any(f.get("rule") == "sh.reinvented" for r in results for f in r["findings"]):
         head += "\nThe launch script redoes work PortMaster already does; the first section of the report shows what replaces each block."
+    from types import SimpleNamespace
+    from pmcheck.guidance import guidance
+    note = guidance([SimpleNamespace(rule=f["rule"], severity=f["severity"]) for r in results for f in r["findings"]], links=False)
+    if note:
+        head += "\n\n" + note
     fname = f"pmcheck-pr{prn}.md" if prn else f"pmcheck-{results[0]['port']}.md"
-    await inter.followup.send(head, file=discord.File(io.BytesIO(md.encode()), filename=fname))
+    await inter.followup.send(head, file=discord.File(io.BytesIO(md.encode()), filename=fname), suppress_embeds=True)
 
 
 async def run_pmcheck_md_from(result):

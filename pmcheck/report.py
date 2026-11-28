@@ -3,6 +3,7 @@ import re
 
 from . import __version__
 from .findings import ERROR, WARN, INFO, ORDER
+from .guidance import guidance
 
 
 def counts(findings):
@@ -64,6 +65,9 @@ def markdown(name, findings, ai=None):
     lead = [f for f in findings if f.rule == "sh.reinvented"]
     fs = sorted((f for f in findings if f.rule != "sh.reinvented"), key=lambda f: (ORDER[f.severity], f.file, f.line))
     out = [f"# pmcheck {__version__}: {name}", "", f"**{summary_line(findings)}**", ""]
+    note = guidance(findings)
+    if note:
+        out += [note, ""]
     icon = {ERROR: "❌", WARN: "⚠️", INFO: "ℹ️"}
     for f in lead:   # the launch script as a whole comes before the single findings
         out += [f"## 📋 Before the details: the launch script ({f.severity})", "", md(f.message), ""]

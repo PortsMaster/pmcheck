@@ -41,7 +41,7 @@ cd "$GAMEDIR"
 mkdir -p "$GAMEDIR/conf/testgame"
 bind_directories ~/.testgame "$GAMEDIR/conf/testgame"
 
-$GPTOKEYB2 "testgame.aarch64" &
+$GPTOKEYB2 "testgame" &
 pm_platform_helper "$GAMEDIR/testgame.aarch64"
 ./testgame.aarch64
 
@@ -304,7 +304,7 @@ class Relaxed(unittest.TestCase):
 class HotkeyLicenceLog(unittest.TestCase):
     def test_no_gptokeyb(self):
         with tempfile.TemporaryDirectory() as t:
-            make_port(t, sh=GOOD_SH.replace('$GPTOKEYB2 "testgame.aarch64" &\n', ""))
+            make_port(t, sh=GOOD_SH.replace('$GPTOKEYB2 "testgame" &\n', ""))
             self.assertIn("sh.no-gptokeyb", rules_of(t, "ERROR"))
 
     def test_classic_gptokeyb_ok(self):
@@ -348,7 +348,7 @@ class OtherIni(unittest.TestCase):
 
     def test_ini_via_variable_checked(self):
         with tempfile.TemporaryDirectory() as t:
-            sh = GOOD_SH.replace('$GPTOKEYB2 "testgame.aarch64" &', 'CTRL="$GAMEDIR/testgame.ini"\n$GPTOKEYB2 "testgame.aarch64" -c "$CTRL" &')
+            sh = GOOD_SH.replace('$GPTOKEYB2 "testgame" &', 'CTRL="$GAMEDIR/testgame.ini"\n$GPTOKEYB2 "testgame" -c "$CTRL" &')
             make_port(t, sh=sh)
             (Path(t) / "testgame" / "testgame.ini").write_text("[controls]\na = return\n")
             self.assertIn("ini.key", rules_of(t))
@@ -678,7 +678,7 @@ class Gptk(unittest.TestCase):
 
     def test_classic_script_ok(self):
         with tempfile.TemporaryDirectory() as t:
-            make_port(t, sh=GOOD_SH.replace('$GPTOKEYB2 "testgame.aarch64" &', '$GPTOKEYB "testgame.aarch64" -c "./testgame.gptk" &'))
+            make_port(t, sh=GOOD_SH.replace('$GPTOKEYB2 "testgame" &', '$GPTOKEYB "testgame.aarch64" -c "./testgame.gptk" &'))
             (Path(t) / "testgame" / "testgame.gptk").write_text("back = esc\nstart = enter\n")
             self.assertEqual(rules_of(t, "ERROR") | rules_of(t, "WARN"), set())
 
@@ -750,3 +750,33 @@ class Mcrust(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Guidance(unittest.TestCase):
+    def fs(self, *rules):
+        from pmcheck.findings import Finding, WARN
+        return [Finding(r, WARN, "x") for r in rules]
+
+    def test_quiet_for_a_small_list(self):
+        from pmcheck.guidance import guidance
+        self.assertEqual(guidance(self.fs("sh.template-diff", "images.size")), "")
+
+    def test_layout_note_with_links(self):
+        from pmcheck.guidance import guidance
+        note = guidance(self.fs("sh.boilerplate", "files.missing"))
+        self.assertIn("does not follow the PortMaster layout", note)
+        self.assertIn("portmaster.games/contribute/porting/packaging/", note)
+        self.assertIn("discord.com/channels/1122861252088172575/1232622554984878120", note)
+        self.assertNotIn("AI assistant", note)
+
+    def test_ai_note_needs_three_script_findings(self):
+        from pmcheck.guidance import guidance
+        self.assertEqual(guidance(self.fs("sh.env-knobs", "sh.umask")), "")
+        note = guidance(self.fs("sh.env-knobs", "sh.umask", "sh.launch-indirection"), links=False)
+        self.assertIn("AI assistant", note)
+        self.assertIn("<https://discord.com/channels/1122861252088172575/1232622554984878120>", note)
+
+    def test_report_leads_with_the_note(self):
+        from pmcheck.report import markdown
+        md = markdown("p", self.fs("sh.boilerplate", "files.missing"))
+        self.assertLess(md.index("does not follow the PortMaster layout"), md.index("## ⚠️ WARN"))

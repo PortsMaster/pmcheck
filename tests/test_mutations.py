@@ -19,7 +19,7 @@ from pmcheck.rules import run_all
 from tests.test_rules import FIX, GAMEINFO, GOOD_SH, README, make_port, png
 
 HOOK = 'cd "$GAMEDIR"\n'          # insertion point in GOOD_SH, right after cd
-LAUNCH = '$GPTOKEYB2 "testgame.aarch64" &\n'
+LAUNCH = '$GPTOKEYB2 "testgame" &\n'
 
 
 def gd(root):
@@ -63,7 +63,7 @@ def lib(root, name, folder="libs.aarch64", fixture=None, licence=True):
 def ini(root, text, name="testgame.ini", pass_c=True):
     (gd(root) / name).write_text(text)
     if pass_c:
-        sh(root, lambda s: s.replace(LAUNCH, f'$GPTOKEYB2 "testgame.aarch64" -c "./{name}" &\n'))
+        sh(root, lambda s: s.replace(LAUNCH, f'$GPTOKEYB2 "testgame" -c "./{name}" &\n'))
 
 
 def gptk(root, text):
@@ -115,8 +115,8 @@ MUTATIONS = [
     ("portmsg direct", insert('./portmsg.${DEVICE_ARCH} "Hello"\n'), "sh.portmsg", "ERROR"),
     ("plain sudo", insert("sudo chmod 666 /dev/uinput\n"), "sh.sudo", "WARN"),
     ("no gptokeyb", lambda r: sh(r, lambda s: s.replace(LAUNCH, "")), "sh.no-gptokeyb", "ERROR"),
-    ("-c file missing", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB2 "testgame.aarch64" -c "./nothere.ini" &\n')), "sh.gptk-missing", "ERROR"),
-    ("-c $GAMEDIR file missing", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB2 "testgame.aarch64" -c "$GAMEDIR/nothere.ini" &\n')), "sh.gptk-missing", "ERROR"),
+    ("-c file missing", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB2 "testgame" -c "./nothere.ini" &\n')), "sh.gptk-missing", "ERROR"),
+    ("-c $GAMEDIR file missing", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB2 "testgame" -c "$GAMEDIR/nothere.ini" &\n')), "sh.gptk-missing", "ERROR"),
     ("old log line", insert('exec > "$GAMEDIR/log.txt" 2>&1\n'), "sh.log-old", "WARN"),
     ("kill gptokeyb after patcher", insert('source "$controlfolder/utils/patcher.txt"\n$ESUDO kill -9 $(pidof gptokeyb)\n'), "sh.kill-gptokeyb", "WARN"),
     ("echo before exit", insert('if [ ! -f data.pak ]; then\n  echo "data.pak missing"\n  exit 1\nfi\n'), "sh.echo-message", "WARN"),
@@ -186,6 +186,7 @@ MUTATIONS = [
                                                    write("testgame/tools/patchscript", "#!/bin/bash\n" + "echo x\n" * 300)), "patcher.length", "INFO"),
     ("own xdelta3 in tools/", write("testgame/tools/xdelta3", "x"), "files.bundled-tool", "INFO"),
     ("empty covers entry", lambda r: pj(r, image={"screenshot": "screenshot.png", "covers": [""]}), "port.json.covers", "INFO"),
+    ("CPU governor written", insert('echo performance > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor\n'), "sh.sysfs-write", "WARN"),
     ("square cover", write("testgame/cover.png", png(240, 240)), "images.cover-size", "ERROR"),
     ("cover at 400x300", write("testgame/cover.png", png(400, 300)), "images.cover-size", "ERROR"),
     ("template placeholder left in a licence", write("testgame/licenses/LICENSE.extra.txt", "Copyright (c) 2026 PORTER_NAME\nMIT\n"), "files.placeholder", "WARN"),
@@ -314,6 +315,8 @@ MUTATIONS = [
 
 # (name, change): valid ways of writing a port; must add no ERROR or WARN
 VALID = [
+    ("taskset through PortMaster's helper", insert('source "$controlfolder/tasksetter"\n')),
+    ("reading the governor", insert('cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor > "$GAMEDIR/gov.txt"\n')),
     ("cover at 640x480", write("testgame/cover.png", png(640, 480))),
     ("python game on the python runtime", lambda r: sh(r, lambda t: t.replace("\n./testgame.aarch64\n", '\nexport PYTHONHOME="$GAMEDIR/py"\npython3 "$GAMEDIR/game.py"\n', 1))),
     ('patchscript with checked xdelta3 and input check', both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
@@ -374,14 +377,14 @@ VALID = [
     ("GameMaker template exports", insert('export LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"\nexport SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"\n')),
     ("classic gptokeyb", lambda r: sh(r, lambda s: s.replace("$GPTOKEYB2", "$GPTOKEYB"))),
     ("classic .gptk", lambda r: gptk(r, "back = esc\nstart = enter\na = space\nb = \\\"\nup = up\nup = repeat\n")),
-    ("gptokeyb2 -x mode", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB2 "testgame.aarch64" -x &\n'))),
-    ("-c file made by the script", lambda r: sh(r, lambda s: s.replace(LAUNCH, 'cp "$GAMEDIR/conf/default.ini" "$GAMEDIR/made.ini"\n$GPTOKEYB2 "testgame.aarch64" -c "$GAMEDIR/made.ini" &\n'))),
+    ("gptokeyb2 -x mode", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB2 "testgame" -x &\n'))),
+    ("-c file made by the script", lambda r: sh(r, lambda s: s.replace(LAUNCH, 'cp "$GAMEDIR/conf/default.ini" "$GAMEDIR/made.ini"\n$GPTOKEYB2 "testgame" -c "$GAMEDIR/made.ini" &\n'))),
     ("-c controlfolder template", lambda r: sh(r, lambda s: s.replace(LAUNCH, '$GPTOKEYB "testgame.aarch64" -c "$controlfolder/gamecontrollerdb.txt" &\n'))),
     ("helper ini not for gptokeyb", both(write("testgame/helper.ini", "[controls]\na = context_click\n"),
                                          insert('HELPER="$GAMEDIR/helper.ini"\n'))),
     ("gptokeyb2 select alias", lambda r: ini(r, "[controls]\nselect = esc\n")),
     ("ini via variable", lambda r: (ini(r, "[controls]\na = space\nb = \\\"\n", pass_c=False),
-                                    sh(r, lambda s: s.replace(LAUNCH, 'CTRL="$GAMEDIR/testgame.ini"\n$GPTOKEYB2 "testgame.aarch64" -c "$CTRL" &\n')))),
+                                    sh(r, lambda s: s.replace(LAUNCH, 'CTRL="$GAMEDIR/testgame.ini"\n$GPTOKEYB2 "testgame" -c "$CTRL" &\n')))),
     ("ini with hotkey section", lambda r: ini(r, "[controls]\na = space\nhotkey = hold_state hk_state\n\n[controls:hk_state]\nr1 = enter\n")),
     ("runtime with .squashfs", lambda r: pj(r, runtime=["weston_pkg_0.2.squashfs"])),
     ("runtime without suffix", lambda r: pj(r, runtime=["weston_pkg_0.2"])),
