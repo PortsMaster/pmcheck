@@ -79,7 +79,6 @@ META_FILES = {"port.json", "readme.md", "gameinfo.xml", "screenshot.png", "scree
 IMAGE_MAX_BYTES = 100 * 1024
 PACKAGING_GUIDE = "https://portmaster.games/contribute/porting/packaging/"
 SCRIPT_TEMPLATES = "https://portmaster.games/contribute/porting/script-templates/"
-FIRST_PORT_GUIDE = "https://portmaster.games/contribute/porting/your-first-port/"
 DISCORD_FIRST_PORT = "https://discord.com/channels/1122861252088172575/1232622554984878120"
 PNG_COMPRESSOR = "https://portmaster.games/tools/png-compressor/"
 COVER_GENERATOR = "https://portmaster.games/tools/cover-generator/"

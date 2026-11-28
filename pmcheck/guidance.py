@@ -41,6 +41,5 @@ def guidance(findings, links=True):
                    "that PortMaster and the template already provide. AI tools are welcome here, and saying so in the PR helps the reviewers. Before you submit:\n"
                    "- Read every line, and take out what you cannot explain. Most merged ports are short.\n"
                    "- Base the script on a merged port that is close to yours, not on a generic template.\n\n"
-                   f"The #your-first-port channel has a complete porting reference written for AI-assisted porting, kept up to date there: {u(data.DISCORD_FIRST_PORT)}. "
-                   f"The short version is on {u(data.FIRST_PORT_GUIDE)}.")
+                   f"The complete porting reference for AI-assisted porting is at the bottom of the #your-first-port channel on Discord: {u(data.DISCORD_FIRST_PORT)}")
     return "\n\n".join(out)
