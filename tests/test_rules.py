@@ -764,6 +764,7 @@ class Guidance(unittest.TestCase):
     def test_layout_note_with_links(self):
         from pmcheck.guidance import guidance
         note = guidance(self.fs("sh.boilerplate", "files.missing"))
+        self.assertIn("does not meet the PortMaster standard yet and cannot be accepted", note)
         self.assertIn("2 of the 2 findings below are about how the package", note)
         self.assertIn("portmaster.games/contribute/porting/packaging/", note)
         self.assertIn("discord.com/channels/1122861252088172575/1232622554984878120", note)

@@ -30,7 +30,8 @@ def guidance(findings, links=True):
     n_shaped = sum(1 for f in findings if f.rule in AI_SHAPED)
     out = []
     if len(structure) >= 2 or any(r.startswith("structure.no-") for r in structure):
-        out.append(f"**{n_structure} of the {total} findings below are about how the package and the launch script are laid out.** Fixing those first usually clears more of the list. "
+        out.append("**As it is, this port does not meet the PortMaster standard yet and cannot be accepted into PortMaster.** "
+                   f"{n_structure} of the {total} findings below are about how the package and the launch script are laid out. Fixing those first usually clears more of the list. "
                    "To learn how a port is put together and how the launch scripts need to look here:\n"
                    f"- Packaging guide: {u(data.PACKAGING_GUIDE)}\n"
                    f"- Script templates: {u(data.SCRIPT_TEMPLATES)}\n"
