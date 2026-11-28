@@ -92,14 +92,12 @@ ARCHIVE_FILE="gamedata.tar.gz"
 if [[ -f "$ARCHIVE_FILE" ]]; then
     pm_message "Extracting game data, this can take a few minutes..." --title "Please wait"
     if ! gunzip -c "$ARCHIVE_FILE" | tar --no-same-owner -xf -; then
-        pm_message "Could not extract $ARCHIVE_FILE. Check that there is enough free space, then launch again."
-        sleep 5
+        pm_show_error "Could not extract $ARCHIVE_FILE. Check that there is enough free space, then launch again." --title "Extraction failed"
         exit 1
     fi
     $ESUDO rm -f "$ARCHIVE_FILE"
 elif [ ! -f '{guard}' ]; then
-    pm_message "No game data found and $ARCHIVE_FILE is missing. Reinstall the port."
-    sleep 5
+    pm_show_error "No game data found and $ARCHIVE_FILE is missing. Reinstall the port." --title "Game data missing"
     exit 1
 fi'''
 

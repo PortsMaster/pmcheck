@@ -272,12 +272,12 @@ def port_json(port):
         yield Finding("port.json.name", WARN, f"name is {name!r}; a new port's name is <game folder>.zip, {gd + '.zip'!r} (older ports keep theirs).", file=f)
     items = [str(i).rstrip("/") for i in (pj.get("items") or [])]
     actual = [s.name for s in port.scripts] + ([gd] if gd else [])
-    for i in items:
-        if i not in actual:
-            yield Finding("port.json.items", ERROR, f"items lists {i!r}, which is not in the package.", file=f)
-    for a in actual:
+    for i in items if port.scripts and gd else []:   # without a script or game folder structure.* already says so
+        if i not in actual and not (port.root / i).exists():
+            yield Finding("port.json.items", ERROR, f"items lists `{i}`, which is not in the package.", file=f)
+    for a in actual if port.scripts and gd else []:
         if a not in items:
-            yield Finding("port.json.items", ERROR, f"{a!r} is in the package but not in items.", file=f)
+            yield Finding("port.json.items", ERROR, f"`{a}` is in the package but not in items.", file=f)
     for k in attr:
         if k not in data.PORT_JSON_ATTRS:
             yield Finding("port.json.unknown-attr", WARN, f"Unknown attr {k!r}.", file=f)
@@ -331,6 +331,10 @@ def port_json(port):
                 yield Finding("port.json.runtime", ERROR, f"runtime {r!r} is not in PortMaster's runtime catalog (checked {cat['updated']}); "
                               "harbourmaster refuses it as an unknown runtime, so the port can't download it.", file=f,
                               fix="Use a published runtime, or get the new runtime added to PortMaster first.")
+    covers = ((attr.get("image") or {}).get("covers") if isinstance(attr.get("image"), dict) else None) or []
+    if any(not str(c).strip() for c in covers):
+        yield Finding("port.json.covers", INFO, 'image.covers holds an empty entry (`[""]`). No merged port has one.', file=f,
+                      fix='Leave `"covers"` out, or list the real file names.')
     arch = attr.get("arch") or []
     found = sorted({i["arch"] for _, i in elves(port)})
     bad = [a for a in arch if a not in data.ARCHES]
@@ -488,7 +492,13 @@ def images(port):
         size = image_size(shot)
         if size and tuple(size) != (640, 480):
             yield Finding("images.screenshot-size", ERROR, f"screenshot is {size[0]}x{size[1]}, must be 640x480.", file=port.rel(shot))
-    if not (port.meta_file("cover.png") or port.meta_file("cover.jpg")):
+    cov = port.meta_file("cover.png") or port.meta_file("cover.jpg")
+    if cov:
+        csize = image_size(cov)
+        if csize and tuple(csize) != (640, 480):
+            yield Finding("images.cover-size", ERROR, f"cover is {csize[0]}x{csize[1]}, must be 640x480.", file=port.rel(cov),
+                          fix=f"Make a 640x480 cover with {data.COVER_GENERATOR}")
+    if not cov:
         yield Finding("images.no-cover", INFO, "No cover.png; the screenshot is used in its place.",
                       fix=f"Make one with {data.COVER_GENERATOR}")
     for p in (p for d in port.meta_dirs() for p in d.iterdir()):
@@ -842,7 +852,10 @@ def binaries(port):
         if p.name == "java" and p.parent.name == "bin" and is_elf(p):
             yield Finding("runtime.bundled", WARN, f"{rel}: bundled Java. PortMaster provides JDK/JRE runtimes (squashfs).", file=rel)
         elif re.match(r"^libmonosgen-2\.0\.so|^libcoreclr\.so", p.name):
-            yield Finding("runtime.bundled", WARN, f"{rel}: bundled Mono/.NET. PortMaster provides runtime squashfs files.", file=rel)
+            rts = (json_load(port).get("attr") or {}).get("runtime") if isinstance(json_load(port), dict) else None
+            godot = [r for r in (rts if isinstance(rts, list) else [rts or ""]) if str(r).startswith("godot_") and "mono" not in str(r)]
+            hint = (f" This looks like a Godot .NET export, but port.json asks for `{godot[0]}`; the .NET build needs the matching `{godot[0].replace('.squashfs', '')}.mono.squashfs`." if godot else "")
+            yield Finding("runtime.bundled", WARN, f"{rel}: bundled Mono/.NET. PortMaster provides runtime squashfs files.{hint}", file=rel)
 
 
 @lru_cache(maxsize=None)
@@ -1332,7 +1345,7 @@ def extra_code(port):
     ship at most data.PORT_FILES['own_code']['max'] lines of it."""
     if port.gamedir is None or not port.scripts:
         return
-    if peers.kind(peers.tags(port.read_text(port.scripts[0]))) in peers.ENGINE_SCRIPT_KINDS:
+    if peers.kind(peers.tags(port.read_text(port.scripts[0]))) in peers.ENGINE_SCRIPT_KINDS or _runs_python_game(port.read_text(port.scripts[0])):
         return
     shared, own = data.PORT_FILES["shared"], []
     for p in port.logical_files():
@@ -1613,6 +1626,61 @@ def helper_copy(port):
         yield Finding("files.helper-changed", INFO, f"{port.rel(p)} differs from every version of {p.name} that merged ports share "
                       f"({sum(1 for v in shared.values() if v == p.name)} versions). The patch step runs this changed copy as root on the player's game files.",
                       file=port.rel(p), fix=f"Use one of the shared versions of {p.name} unchanged. If the port needs a change, say in the README what it changes and why.")
+
+
+_PLACEHOLDER = re.compile(r"\b(?:PORTER_NAME|PROJECT_URL|YOUR_NAME|YOUR_HANDLE|GAME_NAME|PORT_NAME|TODO-[\w-]+)\b|<(?:porter|project|game)[ _-](?:name|url)>", re.I if False else 0)
+
+
+@check
+def placeholders(port):
+    """Template text the porter never filled in (PORTER_NAME in port.json and the licence, PROJECT_URL in the testing thread)."""
+    if port.gamedir is None:
+        return
+    seen = []
+    for d in port.meta_dirs():
+        files = [p for p in d.iterdir() if p.is_file()]
+        files += [p for lic in (d / "licenses", d / "license", d / "LICENSE") if lic.is_dir() for p in lic.iterdir() if p.is_file()]
+        for p in files:
+            if p.suffix.lower() not in (".json", ".md", ".txt", ".xml", ".ini") or p.stat().st_size > 300_000:
+                continue
+            for n, line in enumerate(port.read_text(p).splitlines(), 1):
+                m = _PLACEHOLDER.search(line)  # case-sensitive: licence texts say "your name"
+                if m:
+                    seen.append((port.rel(p), n, m.group(0)))
+    if seen:
+        where = ", ".join(f"`{f}:{n}` ({w})" for f, n, w in seen[:4])
+        yield Finding("files.placeholder", WARN, f"{len(seen)} placeholder{'s' if len(seen) > 1 else ''} from the template never replaced: {where}"
+                      f"{', ...' if len(seen) > 4 else ''}. They end up on the website and in the licence file.", file=seen[0][0], line=seen[0][1],
+                      fix="Put in the real porter name and project URL, or delete the line.")
+
+
+def _runs_python_game(text):
+    """The command that ends the script, before pm_finish, is Python running the port's own file: `python3 game.py`, `"$PY" "$GAMEDIR/oregon.py"`.
+    A python helper that runs before a native game does not count."""
+    tail = [l for _, l in _code_lines(text) if not re.match(r"(?:pm_finish\b|exit\b|fi\b|done\b|\}|esac\b|else\b|unset\b|\$ESUDO\s+(?:kill|umount|systemctl)|rm\b|printf\b|echo\b)", l)]
+    return bool(tail) and bool(re.search(r"(?:^|[\s;&|(])(?:/usr/bin/)?(?:python3?[\d.]*|\"?\$\{?PY(?:THON)?\}?\"?)\s+(?:-[A-Za-z]+\s+)*[\"']?[^\s\"']*\.py\b", tail[-1]))
+
+
+@check
+def system_python(port):
+    """The game is a Python program run by whatever python3 the device has. Merged Python ports use PortMaster's python runtime
+    (python_3.x.squashfs, pyxel): 0 of 33 scripts that run Python start the game with the system's."""
+    if port.gamedir is None:
+        return
+    for s in port.scripts:
+        text = port.read_text(s)
+        if not _runs_python_game(text) or re.search(r"python_?3[\d.]*\.squashfs|pyxel|PYTHONHOME|runtime_check", text):
+            continue
+        code = _code_lines(text)
+        n = next((n for n, l in code if re.search(r"command\s+-v\s+python|which\s+python|/usr/bin/python|\bPY=", l)), None) \
+            or next(n for n, l in code if re.search(r"\.py\b", l))
+        kill = next((l for _, l in code if re.search(r"GPTOKEYB2?\b.*(?:basename|readlink|python)", l)), None)
+        yield Finding("sh.system-python", WARN, "The game is started with the python3 the device happens to have. CFWs ship different Python versions with different modules, "
+                      "and PortMaster's Python runtime (`python_3.11.squashfs`, mounted with `runtime_check`) exists so that every device runs the same one. "
+                      "None of the merged scripts that run Python uses the system's."
+                      + (" The kill switch is also given the interpreter's name, so Start+Select ends every process of that name, not just this game." if kill else ""),
+                      file=port.rel(s), line=n,
+                      fix="Use the python runtime as the merged Python ports do (see the template for Python/Pyxel ports), and start gptokeyb with the name of the process the runtime starts.")
 
 @check
 def loader_build(port):

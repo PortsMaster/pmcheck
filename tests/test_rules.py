@@ -89,7 +89,7 @@ def make_port(root, **over):
     (gd / "README.md").write_text(README)
     (gd / "testing_thread.txt").write_text("x")
     (gd / "screenshot.png").write_bytes(png(*over.get("shot", (640, 480))))
-    (gd / "cover.png").write_bytes(png(64, 64))
+    (gd / "cover.png").write_bytes(png(640, 480))
     (gd / "licenses" / "LICENSE.testgame").write_text("MIT")
     for i in range(over.get("extra_files", 0)):
         (gd / "data").mkdir(exist_ok=True)
@@ -493,6 +493,14 @@ class BadPorts(unittest.TestCase):
                 self.assertNotIn("port.json.runtime", rules_of(t))
             with mock.patch.object(data, "runtime_in_live_catalog", return_value=False):
                 self.assertIn("port.json.runtime", rules_of(t))
+
+    def test_no_script_does_not_cascade_into_items_errors(self):
+        with tempfile.TemporaryDirectory() as t:
+            make_port(t)
+            (Path(t) / "Test Game.sh").unlink()
+            got = rules_of(t)
+            self.assertIn("structure.no-script", got)
+            self.assertNotIn("port.json.items", got)
 
     def test_screenshot_size(self):
         self.check("images.screenshot-size", shot=(320, 240))

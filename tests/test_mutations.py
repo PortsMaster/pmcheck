@@ -185,6 +185,11 @@ MUTATIONS = [
     ("patchscript longer than any merged one", both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
                                                    write("testgame/tools/patchscript", "#!/bin/bash\n" + "echo x\n" * 300)), "patcher.length", "INFO"),
     ("own xdelta3 in tools/", write("testgame/tools/xdelta3", "x"), "files.bundled-tool", "INFO"),
+    ("empty covers entry", lambda r: pj(r, image={"screenshot": "screenshot.png", "covers": [""]}), "port.json.covers", "INFO"),
+    ("square cover", write("testgame/cover.png", png(240, 240)), "images.cover-size", "ERROR"),
+    ("cover at 400x300", write("testgame/cover.png", png(400, 300)), "images.cover-size", "ERROR"),
+    ("template placeholder left in a licence", write("testgame/licenses/LICENSE.extra.txt", "Copyright (c) 2026 PORTER_NAME\nMIT\n"), "files.placeholder", "WARN"),
+    ("game started with the system's python3", lambda r: sh(r, lambda t: t.replace("\n./testgame.aarch64\n", '\nPY="$(command -v python3)"\n"$PY" "$GAMEDIR/game.py"\n', 1)), "sh.system-python", "WARN"),
     ('xdelta3 result not checked, original removed', both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
                       write("testgame/tools/patchscript", '#!/bin/bash\n[ -f "$GAMEDIR/data.win" ] || exit 1\n"$controlfolder/xdelta3" -d -s "$GAMEDIR/data.win" -f p.xdelta "$GAMEDIR/game.droid"\nrm -f "$GAMEDIR/data.win"\n')), 'patcher.xdelta-unchecked', 'WARN'),
     ('patchscript never checks its input', both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
@@ -309,6 +314,8 @@ MUTATIONS = [
 
 # (name, change): valid ways of writing a port; must add no ERROR or WARN
 VALID = [
+    ("cover at 640x480", write("testgame/cover.png", png(640, 480))),
+    ("python game on the python runtime", lambda r: sh(r, lambda t: t.replace("\n./testgame.aarch64\n", '\nexport PYTHONHOME="$GAMEDIR/py"\npython3 "$GAMEDIR/game.py"\n', 1))),
     ('patchscript with checked xdelta3 and input check', both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
                       write("testgame/tools/patchscript", '#!/bin/bash\n[ -f "$GAMEDIR/data.win" ] || { echo "Patching process failed!"; exit 1; }\n"$controlfolder/xdelta3" -d -s a -f p b || { echo "Patching process failed!"; exit 1; }\nrm -f a\n'))),
     ('patchscript with if ! xdelta3', both(insert('export PATCHER_FILE="$GAMEDIR/tools/patchscript"\n'),
